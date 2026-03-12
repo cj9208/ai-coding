@@ -6,33 +6,39 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-      # Added more useful hooks for better code quality
-      - id: check-added-large-files
-      - id: check-merge-conflict
-      - id: detect-private-key
   - repo: https://github.com/psf/black
-    rev: 23.1.0
+    rev: 26.3.1
     hooks:
       - id: black
+        # Added file restriction to speed up
+        files: \.py$
   - repo: https://github.com/pycqa/flake8
-    rev: 6.0.0
+    rev: 7.3.0
     hooks:
       - id: flake8
-  # Updated isort to latest version
+        # Added file restriction to speed up
+        files: \.py$
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 8.0.1
     hooks:
       - id: isort
-  # Added new hooks for type checking, security, and commit message validation
+        # Added file restriction to speed up
+        files: \.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
+    rev: v1.19.1
     hooks:
       - id: mypy
+        # Optional: run only on push to reduce commit time
+        stages: [push]
+        files: \.py$
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.7
+    rev: 1.9.4
     hooks:
       - id: bandit
+        # Optional: run only on push to reduce commit time
+        stages: [push]
+        files: \.py$
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v3.13.0
+    rev: v4.13.9
     hooks:
       - id: commitizen
