@@ -12,12 +12,17 @@ repos:
       - id: black
         # Added file restriction to speed up
         files: \.py$
+        # Added target version to fix Python 3.12 compatibility
+        args: [--target-version=py312]
   - repo: https://github.com/pycqa/flake8
     rev: 7.3.0
     hooks:
       - id: flake8
         # Added file restriction to speed up
         files: \.py$
+        # Increased max line length to 100 (common modern standard)
+        # Extended ignore to include E203 (conflicts with black formatter)
+        args: [--max-line-length=100, --extend-ignore=E203]
   - repo: https://github.com/pycqa/isort
     rev: 8.0.1
     hooks:
@@ -28,15 +33,11 @@ repos:
     rev: v1.19.1
     hooks:
       - id: mypy
-        # Optional: run only on push to reduce commit time
-        stages: [push]
         files: \.py$
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4
     hooks:
       - id: bandit
-        # Optional: run only on push to reduce commit time
-        stages: [push]
         files: \.py$
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.13.9
