@@ -24,6 +24,11 @@ class MedianFinder:
         return (-self.small[0] + self.large[0]) / 2.0
 
 
+# key point is that we only care about the median, so if the element to be deleted
+# is not the top of the heap, we can just mark it as "delayed"
+# and remove it lazily when it reaches the top
+
+
 class SlidingWindowMedian:
     def __init__(self, k):
         self.k = k

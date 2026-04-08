@@ -1,5 +1,8 @@
 # build a lru cache using doubly linked list and a map
 
+# use doubly linked list to store the nodes for O(1) insertion and deletion,
+# and a map to store the key-node pairs for O(1) access
+
 
 class Node:
     def __init__(self, key, value):

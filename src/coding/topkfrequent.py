@@ -54,6 +54,8 @@ def topkfrequent_heap(nums, k):
     print(counts)
 
     heap = []
+    # min heap of size k, (freq, num)
+    # we want top k frequent, so we pop the least frequent when size exceeds k
     for n, c in counts.items():
         heapq.heappush(heap, (c, n))
         if len(heap) > k:

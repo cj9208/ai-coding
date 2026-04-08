@@ -33,6 +33,10 @@ def kthSmallest(matrix, k):
 
 
 # use heap for kth elment if k is small
+# can be exteneded to external sorting for large data that doesn't fit in memory,
+# using a min heap to merge k sorted lists (rows of the matrix)
+
+
 def kthSmallest_heap(matrix, k):
     n = len(matrix)
     heap = []

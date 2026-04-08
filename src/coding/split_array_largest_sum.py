@@ -73,7 +73,7 @@ def minimizeMaxSum(nums, m):
             if subsets[i] == 0:
                 break
 
-    backtrack(0, 10000)
+    backtrack(0, ans)
     return ans
 
 

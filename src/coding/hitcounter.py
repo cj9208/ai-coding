@@ -1,3 +1,16 @@
+"""
+extensions
+1. map-reduce, split the hits into several machines, each machine counts hits
+    for a subset of the time buckets, then aggregate the counts
+2. use Time to live (TTL) to automatically expire old hits,
+    so we don't have to check the timestamps manually
+3. for quick estimation of hits, we can use a probabilistic data structure like Count-Min Sketch
+4. if distribution is wanted, we can use segment trees.
+    Support range queries for hits in a given time interval.
+    It is also easy to merge two segment trees.
+"""
+
+
 class HitCounter:
     def __init__(self):
         # 300 buckets for 300 seconds

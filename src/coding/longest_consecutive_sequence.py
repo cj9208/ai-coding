@@ -1,4 +1,5 @@
 # the key point, we only need to check the number that appears in the begin of a sequence
+# the judgement: if n - 1 not in nums, then n is the begin of a sequence
 
 
 def longest_consecutive_sequence(nums):
