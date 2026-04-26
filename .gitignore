@@ -2,6 +2,6 @@
 data/
 logs/
 
-
+*.pyc
 
 uv.lock
