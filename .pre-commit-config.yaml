@@ -27,8 +27,8 @@ repos:
     rev: 8.0.1
     hooks:
       - id: isort
-        # Added file restriction to speed up
         files: \.py$
+        args: ["--profile", "black"]
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.19.1
     hooks:
