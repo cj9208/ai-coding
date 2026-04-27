@@ -39,6 +39,7 @@ repos:
     hooks:
       - id: bandit
         files: \.py$
+        args: ["--skip", "B101", "--exclude", "tests"]
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.13.9
     hooks:
