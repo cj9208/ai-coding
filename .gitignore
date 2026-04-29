@@ -2,8 +2,8 @@
 data/
 logs/
 v/
+openspec-skills/
+
 .env
-
 *.pyc
-
 uv.lock
