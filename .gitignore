@@ -3,6 +3,8 @@ data/
 logs/
 v/
 openspec-skills/
+repo-skills/
+.opencode/
 
 .env
 *.pyc
