@@ -7,7 +7,7 @@ function update_openspec_skills() {
   cd openspec-skills
   git pull
   cd ..
-  cp -r openspec-skills/openspec-* .opencode/skills
+  cp -r repo-skills/openspec-skills/openspec-* .opencode/skills
   echo "OpenSpec skills updated!"
 }
 
