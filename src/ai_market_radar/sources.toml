@@ -1,0 +1,110 @@
+# AI Market Radar source registry.
+# Each [[source]] is one poll target; entity is openai|anthropic|copilot,
+# signal the default signal type, kind selects the fetcher adapter:
+#   rss | markdown | html_news | html_snapshot
+
+[[source]]
+key = "openai_news"
+name = "OpenAI News"
+entity = "openai"
+signal = "product"
+kind = "rss"
+url = "https://openai.com/news/rss.xml"
+
+[[source]]
+key = "openai_blog"
+name = "OpenAI Blog"
+entity = "openai"
+signal = "research"
+kind = "rss"
+url = "https://openai.com/blog/rss.xml"
+
+[[source]]
+key = "openai_changelog"
+name = "OpenAI API Changelog"
+entity = "openai"
+signal = "product"
+kind = "markdown"
+url = "https://platform.openai.com/docs/changelog.md"
+
+[[source]]
+key = "openai_models"
+name = "OpenAI Models Reference"
+entity = "openai"
+signal = "research"
+kind = "markdown"
+url = "https://platform.openai.com/docs/models.md"
+
+[[source]]
+key = "openai_status"
+name = "OpenAI Status"
+entity = "openai"
+signal = "status"
+kind = "rss"
+url = "https://status.openai.com/history.rss"
+
+[[source]]
+key = "anthropic_release_notes"
+name = "Claude Platform Release Notes"
+entity = "anthropic"
+signal = "product"
+kind = "markdown"
+url = "https://docs.anthropic.com/en/release-notes/api.md"
+
+[[source]]
+key = "anthropic_claude_code"
+name = "Claude Code Changelog"
+entity = "anthropic"
+signal = "product"
+kind = "markdown"
+url = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
+
+[[source]]
+key = "anthropic_news"
+name = "Anthropic News"
+entity = "anthropic"
+signal = "research"
+kind = "html_news"
+url = "https://www.anthropic.com/news"
+
+[[source]]
+key = "anthropic_pricing"
+name = "Anthropic Pricing"
+entity = "anthropic"
+signal = "deal"
+kind = "html_snapshot"
+url = "https://www.anthropic.com/pricing"
+
+[[source]]
+key = "anthropic_status"
+name = "Claude Status"
+entity = "anthropic"
+signal = "status"
+kind = "rss"
+url = "https://status.anthropic.com/history.rss"
+
+[[source]]
+key = "github_blog"
+name = "GitHub Blog"
+entity = "copilot"
+signal = "research"
+kind = "rss"
+url = "https://github.blog/feed/"
+filter = { tags_include = ["copilot", "artificial intelligence"] }
+
+[[source]]
+key = "github_changelog"
+name = "GitHub Changelog"
+entity = "copilot"
+signal = "product"
+kind = "rss"
+url = "https://github.blog/changelog/feed/"
+filter = { tags_include = ["copilot"] }
+
+[[source]]
+key = "copilot_plans"
+name = "GitHub Copilot Plans"
+entity = "copilot"
+signal = "deal"
+kind = "html_snapshot"
+url = "https://github.com/features/copilot/plans"
