@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}项目 · 文件管理器{% endblock %}
+{% block crumb %}
+<div class="crumbs"><a href="/">文件</a><span class="sep">/</span><strong>项目</strong></div>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>新建项目</h2>
+  <form method="post" action="/projects" class="inline-form">
+    <input type="text" name="name" placeholder="项目名称" required>
+    <input type="text" name="description" placeholder="描述（可选）">
+    <button type="submit">创建</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>项目列表 <span class="count">共 {{ projects | length }} 个</span></h2>
+  {% if projects %}
+  <div class="grid">
+    {% for p in projects %}
+    <a class="tile" href="/projects/{{ p.id }}">
+      <span class="tile-name">{{ p.name }}</span>
+      {% if p.description %}<span class="tile-desc">{{ p.description }}</span>{% endif %}
+      <span class="tile-meta">{{ p.file_count }} 个文件</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">还没有项目，用上方表单创建第一个。</p>
+  {% endif %}
+</section>
+{% endblock %}

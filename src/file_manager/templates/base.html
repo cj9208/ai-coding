@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}文件管理器{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+{% set path = request.url.path %}
+{% set tab = "projects" if path.startswith("/projects") else ("teams" if path.startswith("/teams") else "files") %}
+<body>
+<header class="topbar">
+  <a class="brand" href="/">文件管理器</a>
+  <nav>
+    <a class="{{ 'active' if tab == 'files' }}" href="/">文件</a>
+    <a class="{{ 'active' if tab == 'projects' }}" href="/projects">项目</a>
+    <a class="{{ 'active' if tab == 'teams' }}" href="/teams">团队</a>
+  </nav>
+  <div class="identity">
+    {# 下拉用 details/summary 实现，身份桩不依赖后端渲染 #}
+    <details class="menu" id="who-menu">
+      <summary class="avatar-btn">
+        <span class="avatar" id="who-initial">·</span>
+        <span id="who">…</span>
+        <span class="caret">›</span>
+      </summary>
+      <div class="menu-list">
+        <button class="menu-item" type="button" id="change-who">更换当前身份</button>
+        <span class="menu-note">身份只用于标记上传者与团队归属，暂无登录校验。</span>
+      </div>
+    </details>
+  </div>
+</header>
+
+<main class="container">
+  {% block crumb %}{% endblock %}
+  {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+{# 身份输入用页面内模态框，不再用 window.prompt #}
+<div class="modal" id="identity-modal" hidden>
+  <div class="modal-card">
+    <h3>你的姓名</h3>
+    <p>用于记录文件的上传者，不需要密码；本机浏览器记住即可。</p>
+    <input type="text" id="identity-input" placeholder="如：陈杰" autocomplete="off">
+    <div class="modal-actions">
+      <button class="ghost" type="button" id="identity-cancel">取消</button>
+      <button type="button" id="identity-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "_macros.html" import file_table, pager %}
+{% block title %}{{ team.name }} · 文件管理器{% endblock %}
+{% block crumb %}
+<div class="crumbs">
+  <a href="/">文件</a><span class="sep">/</span><a href="/teams">团队</a><span class="sep">/</span><strong>{{ team.name }}</strong>
+</div>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>{{ team.name }} <span class="count">{{ members | length }} 名成员</span></h2>
+
+  <div class="table-wrap">
+  <table class="files">
+    <thead><tr><th>姓名</th><th class="num">上传数</th><th>调整团队</th></tr></thead>
+    <tbody>
+      {% for m in members %}
+      <tr>
+        <td class="name"><span class="avatar sm">{{ m.name | truncate(1, true, "") }}</span>{{ m.name }}</td>
+        <td class="num">{{ m.file_count }}</td>
+        <td class="ops">
+          <form method="post" action="/members/{{ m.id }}/assign" class="inline-form">
+            <input type="hidden" name="next" value="/teams/{{ team.id }}">
+            <select name="team_id">
+              <option value="">（不归属）</option>
+              {% for t in teams if t.id != team.id %}
+              <option value="{{ t.id }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+            <button class="ghost" type="submit">调整</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="empty">暂无成员</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <h3>添加成员</h3>
+  {% if available_members %}
+  <form method="post" action="/teams/{{ team.id }}/add-member" class="inline-form">
+    <select name="member_id">
+      {% for m in available_members %}
+      <option value="{{ m.id }}">{{ m.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">加入团队</button>
+  </form>
+  {% else %}
+  <p class="lead">暂无可加入本团队的成员。新成员请在“团队”页的新建成员处添加，或首次上传时自动注册。</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>团队上传的文件 <span class="count">共 {{ total }} 个</span></h2>
+  <form method="get" class="filter-form">
+    <div class="form-row filters">
+      <span class="row-label">筛选</span>
+      <select name="member_id" onchange="this.form.submit()">
+        <option value="">全部成员</option>
+        {% for m in members %}
+        <option value="{{ m.id }}" {% if filters.uploader_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+      <select name="project_id" onchange="this.form.submit()">
+        <option value="">全部项目</option>
+        {% for p in projects %}
+        <option value="{{ p.id }}" {% if filters.project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="extension" value="{{ filters.extension or '' }}" placeholder="扩展名" size="10">
+      <select name="sort" onchange="this.form.submit()">
+        {% for value, label in sort_options %}
+        <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="ghost" type="submit">应用筛选</button>
+      <a class="reset-link" href="/teams/{{ team.id }}">重置</a>
+    </div>
+  </form>
+
+  {{ file_table(files, next) }}
+  {{ pager(total, page, page_size, base) }}
+</section>
+{% endblock %}

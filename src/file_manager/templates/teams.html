@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}团队 · 文件管理器{% endblock %}
+{% block crumb %}
+<div class="crumbs"><a href="/">文件</a><span class="sep">/</span><strong>团队</strong></div>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>新建成员</h2>
+  <form method="post" action="/members" class="inline-form">
+    <input type="hidden" name="next" value="/teams">
+    <input type="text" name="name" placeholder="姓名" required>
+    <button type="submit">创建成员</button>
+  </form>
+  <p class="lead">成员在此唯一入口创建（首次上传时输入的名字也会自动注册为成员），再到具体团队页把成员加入团队。</p>
+</section>
+
+<section class="card">
+  <h2>新建团队</h2>
+  <form method="post" action="/teams" class="inline-form">
+    <input type="text" name="name" placeholder="团队名称" required>
+    <button type="submit">创建</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>团队列表 <span class="count">共 {{ teams | length }} 个</span></h2>
+  {% if teams %}
+  <div class="grid">
+    {% for t in teams %}
+    <a class="tile" href="/teams/{{ t.id }}">
+      <span class="tile-name">{{ t.name }}</span>
+      <span class="tile-meta">{{ t.member_count }} 名成员</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">还没有团队，用上方表单创建第一个。</p>
+  {% endif %}
+  <p class="lead">说明：首次上传时输入的名字会自动注册为成员（暂不归属团队），之后在各团队页通过下拉框把成员加入团队。</p>
+</section>
+{% endblock %}

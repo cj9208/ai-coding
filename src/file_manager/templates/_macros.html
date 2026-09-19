@@ -1,0 +1,64 @@
+{% macro file_table(files, next, match_map=None) %}
+{% set cols = 9 if match_map is not none else 8 %}
+<div class="table-wrap">
+<table class="files">
+  <thead>
+    <tr>
+      <th>文件名</th><th>标题</th>
+      {% if match_map is not none %}<th>匹配来源</th>{% endif %}
+      <th>项目</th><th>上传者</th><th>团队</th>
+      <th class="num">大小</th><th>时间</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for f in files %}
+    <tr>
+      <td class="name">
+        {% if f.extension %}<span class="ext">{{ f.extension }}</span>{% endif %}
+        <a href="/api/files/{{ f.id }}/download">{{ f.original_filename }}</a>
+        {% if f.tags %}<div class="tags">{{ f.tags }}</div>{% endif %}
+        {% if f.notes %}<div class="notes">{{ f.notes }}</div>{% endif %}
+      </td>
+      <td>{{ f.title or "—" }}</td>
+      {% if match_map is not none %}
+      <td>
+        {% set tags = match_map.get(f.id) %}
+        {% if tags %}
+          {% for t in tags %}<span class="match-tag{% if '模糊' in t %} fuzzy{% endif %}">{{ t }}</span>{% endfor %}
+        {% else %}
+          <span class="muted">筛选条件</span>
+        {% endif %}
+      </td>
+      {% endif %}
+      <td><a href="/projects/{{ f.project_id }}">{{ f.project_name }}</a></td>
+      <td>{{ f.uploader_name }}</td>
+      <td>{{ f.team_name or "—" }}</td>
+      <td class="num">{{ (f.size / 1024) | round(1) }} KB</td>
+      <td class="time">{{ f.created_at | dt }}</td>
+      <td class="ops">
+        <form method="post" action="/files/{{ f.id }}/delete" style="display:inline"
+              onsubmit="return confirm('确定删除 {{ f.original_filename }}？')">
+          <input type="hidden" name="next" value="{{ next }}">
+          <button class="link danger" type="submit">删除</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="{{ cols }}" class="empty">暂无文件</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}
+
+{% macro pager(total, page, page_size, base="") %}
+{% set pages = (total + page_size - 1) // page_size %}
+{% set sep = ("&" if base else "?") %}
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a class="ghost" href="?{{ base }}{{ sep if base }}page={{ page -1 }}">上一页</a>{% endif %}
+  <span>第 {{ page }} / {{ pages }} 页 · 共 {{ total }} 条</span>
+  {% if page < pages %}<a class="ghost" href="?{{ base }}{{ sep if base }}page={{ page +1 }}">下一页</a>{% endif %}
+</div>
+{% endif %}
+{% endmacro %}

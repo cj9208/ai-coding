@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "_macros.html" import file_table, pager %}
+{% block title %}{{ project.name }} · 文件管理器{% endblock %}
+{% block crumb %}
+<div class="crumbs">
+  <a href="/">文件</a><span class="sep">/</span><a href="/projects">项目</a><span class="sep">/</span><strong>{{ project.name }}</strong>
+</div>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>{{ project.name }}</h2>
+  {% if project.description %}<p class="lead">{{ project.description }}</p>{% endif %}
+
+  <details class="panel">
+    <summary>上传文件到本项目</summary>
+    <div class="panel-body">
+      <form method="post" action="/files" enctype="multipart/form-data" class="upload-form">
+        <input type="hidden" name="project_id" value="{{ project.id }}">
+        <input type="file" name="file" required>
+        <input type="text" name="tags" placeholder="标签（逗号分隔）">
+        <input type="text" name="notes" placeholder="备注">
+        <button type="submit">上传</button>
+      </form>
+    </div>
+  </details>
+
+  <h3>本项目的文件 <span class="muted">共 {{ total }} 个</span></h3>
+  <form method="get" class="filter-form">
+    <div class="form-row filters">
+      <span class="row-label">筛选</span>
+      <select name="team_id" onchange="this.form.submit()">
+        <option value="">全部团队</option>
+        {% for t in teams %}
+        <option value="{{ t.id }}" {% if filters.team_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+      <select name="uploader_id" onchange="this.form.submit()">
+        <option value="">全部上传者</option>
+        {% for m in members %}
+        <option value="{{ m.id }}" {% if filters.uploader_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="extension" value="{{ filters.extension or '' }}" placeholder="扩展名，如 pdf" size="10">
+      <select name="sort" onchange="this.form.submit()">
+        {% for value, label in sort_options %}
+        <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="ghost" type="submit">应用筛选</button>
+      <a class="reset-link" href="/projects/{{ project.id }}">重置</a>
+    </div>
+  </form>
+
+  {{ file_table(files, next) }}
+  {{ pager(total, page, page_size, base) }}
+</section>
+{% endblock %}
