@@ -1,17 +1,20 @@
-import os
-from dataclasses import dataclass
+"""Project-local knobs + one nested ``llm: LLMSettings``.
 
-from dotenv import load_dotenv
+LLM connection fields are *not* flattened out of ``LLMSettings`` anymore:
+the old version mirrored six fields and copy-looped them in ``load_config``.
+Now ``Config`` owns a single ``llm`` settings object (built via the shared
+env convention, CLI overrides included) and exposes read-only properties so
+call sites can keep saying ``config.model`` / ``config.api_key``.
+"""
+
+import os
+from dataclasses import dataclass, field
 
 from llm_client.settings import LLMSettings
 
 from .models import SummaryStyle
 
-load_dotenv(encoding="utf-8-sig")
-
-# Single source of truth for LLM connection defaults + env names is
-# llm_client.LLMSettings; this project's Config only adds local knobs.
-_LLM_DEFAULTS = LLMSettings()
+#: LLM connection fields owned by llm_client.LLMSettings (the repo contract)
 _LLM_FIELDS = ("api_key", "base_url", "model", "temperature", "timeout", "max_retries")
 
 
@@ -20,11 +23,8 @@ class Config:
     # Extractor
     extractor_backend: str = "auto"
 
-    # LLM — defaults mirror llm_client.LLMSettings (DeepSeek-compatible provider)
-    api_key: str = _LLM_DEFAULTS.api_key
-    base_url: str = _LLM_DEFAULTS.base_url
-    model: str = _LLM_DEFAULTS.model
-    temperature: float = _LLM_DEFAULTS.temperature
+    # LLM connection — defaults mirror the shared env convention
+    llm: LLMSettings = field(default_factory=LLMSettings)
 
     # Chunking
     chunk_size: int = 3000
@@ -34,9 +34,31 @@ class Config:
     summary_style: SummaryStyle = SummaryStyle.CONCISE
     max_concurrency: int = 4
 
-    # Resilience
-    timeout: int = _LLM_DEFAULTS.timeout
-    max_retries: int = _LLM_DEFAULTS.max_retries
+    # Read-only mirrors of the LLM settings, kept so the CLI/chunker/
+    # summarizer don't have to know which object the fields live in.
+    @property
+    def api_key(self) -> str:
+        return self.llm.api_key
+
+    @property
+    def base_url(self) -> str:
+        return self.llm.base_url
+
+    @property
+    def model(self) -> str:
+        return self.llm.model
+
+    @property
+    def temperature(self) -> float:
+        return self.llm.temperature
+
+    @property
+    def timeout(self) -> int:
+        return self.llm.timeout
+
+    @property
+    def max_retries(self) -> int:
+        return self.llm.max_retries
 
 
 # Local (non-LLM) knobs only; LLM_* env vars are handled by LLMSettings.from_env.
@@ -49,15 +71,14 @@ ENV_MAP = {
 
 
 def load_config(**overrides) -> Config:
-    config = Config()
+    # 1. LLM connection: env/.env first, explicit (CLI) overrides win —
+    #    precedence already implemented by LLMSettings.from_env
+    llm = LLMSettings.from_env(
+        **{k: v for k, v in overrides.items() if k in _LLM_FIELDS}
+    )
+    config = Config(llm=llm)
 
-    # 1. shared env convention (LLM_API_KEY / LLM_BASE_URL / LLM_MODEL /
-    #    LLM_TEMPERATURE / LLM_TIMEOUT / LLM_MAX_RETRIES) via llm_client
-    llm = LLMSettings.from_env()
-    for attr in _LLM_FIELDS:
-        setattr(config, attr, getattr(llm, attr))
-
-    # 2. local env knobs on top
+    # 2. local env knobs
     for env_key, attr in ENV_MAP.items():
         env_val = os.getenv(env_key)
         if env_val is not None:
@@ -71,9 +92,11 @@ def load_config(**overrides) -> Config:
             else:
                 setattr(config, attr, env_val)
 
-    # 3. explicit overrides (CLI flags) win
+    # 3. explicit overrides for local knobs win (LLM ones already merged)
     for key, value in overrides.items():
-        if value is not None and key in Config.__dataclass_fields__:
+        if value is None or key in _LLM_FIELDS:
+            continue
+        if key in Config.__dataclass_fields__:
             if key == "summary_style" and isinstance(value, str):
                 value = SummaryStyle(value)
             setattr(config, key, value)

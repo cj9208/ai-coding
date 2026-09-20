@@ -4,6 +4,7 @@ import tempfile
 import fitz
 import pytest
 
+from llm_client import LLMSettings
 from pdf_summarizer.config import Config
 
 
@@ -66,9 +67,7 @@ def empty_pdf_path():
 @pytest.fixture
 def config():
     return Config(
-        api_key="test-key",
+        llm=LLMSettings(api_key="test-key", timeout=10, max_retries=1),
         chunk_size=500,
         chunk_overlap=50,
-        timeout=10,
-        max_retries=1,
     )

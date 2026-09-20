@@ -2,6 +2,7 @@ import os
 
 import pytest
 
+from llm_client import LLMSettings
 from pdf_summarizer.config import Config
 from pdf_summarizer.models import SummaryStyle
 from pdf_summarizer.summarizer import summarize
@@ -10,12 +11,10 @@ from pdf_summarizer.summarizer import summarize
 @pytest.fixture
 def llm_config():
     return Config(
-        api_key="test-key",
+        llm=LLMSettings(api_key="test-key", timeout=10, max_retries=1),
         chunk_size=2000,
         chunk_overlap=50,
         max_concurrency=2,
-        timeout=10,
-        max_retries=1,
     )
 
 
@@ -26,9 +25,11 @@ def llm_config():
 @pytest.mark.asyncio
 async def test_summarize_live(sample_pdf_path, llm_config):
     config = Config(
-        api_key=os.getenv("LLM_API_KEY", ""),
-        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
-        model=os.getenv("LLM_MODEL", "deepseek-chat"),
+        llm=LLMSettings(
+            api_key=os.getenv("LLM_API_KEY", ""),
+            base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
+            model=os.getenv("LLM_MODEL", "deepseek-chat"),
+        ),
         chunk_size=2000,
         chunk_overlap=50,
         max_concurrency=2,
@@ -66,10 +67,9 @@ async def test_summarize_with_mock(sample_pdf_path, llm_config):
 @pytest.mark.asyncio
 async def test_summarize_style_prompts(sample_pdf_path):
     config = Config(
-        api_key="test-key",
+        llm=LLMSettings(api_key="test-key", max_retries=1),
         chunk_size=2000,
         summary_style=SummaryStyle.BULLETS,
-        max_retries=1,
     )
     mock_response = "- Point 1\n- Point 2"
 

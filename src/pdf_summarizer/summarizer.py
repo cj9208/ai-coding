@@ -1,9 +1,10 @@
 import asyncio
 import logging
 
+from llm_client import LLMClient
+
 from .chunker import chunk_document
 from .extractor import create_extractor
-from .llm_client import LLMClient
 from .models import Chunk, SummaryStyle
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ async def summarize(pdf_path: str, config) -> str:
             total_tokens,
         )
 
-    llm = LLMClient(config)
+    llm = LLMClient(config.llm)
     map_prompt = MAP_PROMPTS.get(
         config.summary_style, MAP_PROMPTS[SummaryStyle.CONCISE]
     )
