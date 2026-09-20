@@ -1,5 +1,12 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+# repo-root anchor per AGENTS.md: outputs always land in data/analyze_birth/
+# no matter where the script is launched from
+REPO_ROOT = Path(__file__).resolve().parents[2]
+OUTPUT_DIR = REPO_ROOT / "data" / "analyze_birth"
 
 
 def simulate_future_births():
@@ -93,7 +100,8 @@ def simulate_future_births():
             "激进补贴(万)": list(predictions["激进补贴 (TFR ~ 1.3)"].values()),
         }
     )
-    df.to_excel("data/birth_predictions.xlsx", index=False)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_excel(OUTPUT_DIR / "birth_predictions.xlsx", index=False)
 
 
 def analyze_demographics_with_thresholds(
@@ -246,8 +254,10 @@ def analyze_demographics_with_thresholds(
     print(df.to_string(index=False))
 
     # 将结果保存到 Excel 文件
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     df.to_excel(
-        f"data/demographics_{birth_scenario.replace(' ', '_')}.xlsx", index=False
+        OUTPUT_DIR / f"demographics_{birth_scenario.replace(' ', '_')}.xlsx",
+        index=False,
     )
 
 

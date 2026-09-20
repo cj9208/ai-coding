@@ -5,8 +5,13 @@ import tomllib
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
+# repo-root anchor per AGENTS.md: readable from any launch cwd
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
-def load_uv_lock(lock_path: str = "uv.lock") -> Dict[str, Any]:
+
+def load_uv_lock(
+    lock_path: str | Path = REPO_ROOT / "uv.lock",
+) -> Dict[str, Any]:
     """Load and parse the uv.lock file."""
     path = Path(lock_path)
     if not path.exists():
@@ -16,7 +21,9 @@ def load_uv_lock(lock_path: str = "uv.lock") -> Dict[str, Any]:
         return tomllib.load(f)
 
 
-def load_pyproject_toml(pyproject_path: str = "pyproject.toml") -> Set[str]:
+def load_pyproject_toml(
+    pyproject_path: str | Path = REPO_ROOT / "pyproject.toml",
+) -> Set[str]:
     """Load pyproject.toml and extract explicit dependencies."""
     path = Path(pyproject_path)
     if not path.exists():
