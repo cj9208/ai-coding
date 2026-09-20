@@ -22,8 +22,8 @@ the others, except where noted below.
   with a confusing `ModuleNotFoundError`.
 - Run tests: `uv run pytest`. Async tests work via `asyncio_mode = "auto"`
   (no markers needed).
-- CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`
-  (`[project.scripts]`).
+- CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`,
+  `research-agent` (`[project.scripts]`).
 - `test_summarize_live` is the only test hitting a real LLM API (skipped when
   `LLM_API_KEY` unset). A 401 there means the key in `.env` is stale — an
   environment issue, not a code regression.
@@ -44,10 +44,11 @@ are already there). Env convention lives only in
 | Path | What it is | LLM? |
 |---|---|---|
 | `src/llm_client/` | shared LLM access point (see rule above) | — it *is* the LLM layer |
+| `src/storage/` | shared storage layer, one module per DB type in use (currently SQLite: `sqlite.py` engine/PRAGMA/session/ensure_columns/sha256_hex, `fts.py` fold_cjk/match_expr/FtsTable). Only generic access knowledge belongs here — table definitions and business stores stay in each project; see `docs/storage-usage-guide.md` | no |
 | `src/pdf_summarizer/` | CLI: PDF → chunks → map-reduce summary | yes, via `llm_client` |
 | `src/ai_market_radar/` | scans OpenAI/Anthropic/Copilot **news sources** into SQLite, digest of new items. "OpenAI" here is a watched entity, not a dependency. Deterministic parsing on purpose — no LLM | no |
 | `src/file_manager/` | FastAPI file manager, metadata-first search (FTS5) | no |
-| `src/research_agent/` | research & recommendation agent — **in progress**; design docs in `docs/research-recommendation-agent/` (read `00-overview.md` first), scaffold follows its module layout (orchestrator/research/clarifying/recommendation/contracts/storage) | yes, via `llm_client` |
+| `src/research_agent/` | research & recommendation agent — **MVP implemented & live-verified 2026-09-20** (`research-agent new/answer/status/report`); design docs in `docs/research-recommendation-agent/` (read `00-overview.md` first, `06-usage-guide.md` to run it), module layout mirrors the docs (orchestrator/research/clarifying/recommendation/contracts/storage) | yes, via `llm_client` |
 | `src/coding/`, `src/modules/` | standalone algorithm exercises and small one-off scripts (e.g. `analyze_birth.py`, `analyze_package_size.py` — root-level scripts were moved into `modules/` to keep `src/` clean) | no |
 | `opencode/` | design proposals produced by AI coding tools (documentation) | — |
 
@@ -57,8 +58,9 @@ are already there). Env convention lives only in
   `data/ai_market_radar/kb.db`; `file_manager` respects `FM_DATABASE_URL`).
 - **FTS5 + CJK quirk (verified on this machine):** the default `unicode61`
   tokenizer drops CJK tokens; `trigram` and `editdist3` are unavailable.
-  Reuse the `fold_cjk` approach from `src/file_manager/fts.py` for Chinese
-  full-text search.
+  The `fold_cjk` folding now lives in the shared layer — build indexes with
+  `storage.FtsTable` and queries with `storage.match_expr`/`token_expr` so
+  the write and query ends can't drift (`src/storage/fts.py`).
 
 ## Style & checks
 

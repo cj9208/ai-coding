@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..config import Settings
 from ..extractors import extract_for
-from ..fts import fts_delete, fts_insert
+from ..fts import FILES_INDEX, fts_values
 from ..models import FileMeta, Member, Project
 
 _FORBIDDEN_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -168,7 +168,7 @@ def store_upload(
     )
     db.add(meta)
     db.flush()
-    fts_insert(db, meta.id, meta.original_filename, meta.title, meta.notes, meta.tags)
+    FILES_INDEX.upsert(db, meta.id, fts_values(meta))
     db.commit()
     db.refresh(meta)
     return meta
@@ -178,7 +178,7 @@ def delete_file(db: Session, settings: Settings, file_id: int) -> None:
     meta = db.get(FileMeta, file_id)
     if meta is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在")
-    fts_delete(db, meta.id)
+    FILES_INDEX.delete(db, meta.id)
     siblings = (
         db.scalar(
             select(func.count())
@@ -205,8 +205,6 @@ def rebuild_fts(db: Session) -> int:
     db.execute(text("DELETE FROM files_fts"))
     metas = db.scalars(select(FileMeta)).all()
     for meta in metas:
-        fts_insert(
-            db, meta.id, meta.original_filename, meta.title, meta.notes, meta.tags
-        )
+        FILES_INDEX.upsert(db, meta.id, fts_values(meta))
     db.commit()
     return len(metas)

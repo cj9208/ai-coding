@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 from ai_market_radar.models import Item
+from storage import SqliteClient
 
 
 class KnowledgeBase:
+    """kb.db access. Raw-DBAPI style kept on purpose (deterministic, no ORM);
+    engine/PRAGMA/lifecycle come from the shared storage layer."""
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._client = SqliteClient(self.path)
+        # long-lived pooled connection: WAL + foreign_keys applied by the
+        # engine's connect listener, as in every other project now
+        self._conn = self._client.connect()
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -39,15 +43,14 @@ class KnowledgeBase:
                 last_items INTEGER
             );
             """)
-        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(items)")}
-        if "tag" not in columns:
-            self._conn.execute(
-                "ALTER TABLE items ADD COLUMN tag TEXT NOT NULL DEFAULT 'feature'"
-            )
+        # additive patch for pre-tag databases (shared-layer ensure_columns,
+        # replacing the hand-rolled PRAGMA table_info + ALTER TABLE)
+        self._client.ensure_columns("items", {"tag": "TEXT NOT NULL DEFAULT 'feature'"})
         self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
+        self._client.dispose()
 
     def insert(self, item: Item) -> bool:
         """Insert a new item; returns True only when it was newly added."""

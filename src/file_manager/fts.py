@@ -1,95 +1,30 @@
-"""files_fts 虚表的手工同步。
+"""files_fts 索引的域定义：表名 + 被索引列。
 
-不走触发器，改由服务层在上传/更新/删除时显式调用：
-同步逻辑集中、可测试，将来接全文索引时也只动这里。
+机制（fold_cjk 折叠、建表 DDL、upsert/delete 同步）全部在通用层
+``storage.fts.FtsTable``；本模块只声明"文件域索引哪些列"，以及把
+FileMeta 映射成索引字典的小助手。
 
-CJK 折叠：本机 SQLite 的 FTS5 unicode61 分词器会丢弃中日韩字符，
-所以写入索引前把 CJK 连续段展开为"单字 + 双字滑窗"并以空格分隔，
-查询端做同样的折叠，保证"财报"按相邻双字匹配（而非散落单字的 AND）。
+同步仍走显式调用（服务层在上传/更新/删除时调 FILES_INDEX），不用触发器：
+逻辑集中、可测试，将来换非 SQLite 索引也只动这里。
 """
 
 from __future__ import annotations
 
-import re
+from storage import FtsTable
 
-from sqlalchemy import text
-from sqlalchemy.orm import Session
+from .models import FileMeta
 
-DDL = """
-CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
-    filename,
-    title,
-    notes,
-    tags
-)
-"""
+#: (可读标签, FTS 列名)；顺序与 metadata 搜索后端的 _FIELDS 对应
+INDEXED_COLUMNS = ("filename", "title", "notes", "tags")
 
-# 常见 CJK 区块：汉字扩展A、汉字、兼容表意、平假名、片假名、谚文音节
-_CJK_RE = re.compile(
-    "[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff" "\u3040-\u30ff\uac00-\ud7a3]+"
-)
+FILES_INDEX = FtsTable("files_fts", INDEXED_COLUMNS)
 
 
-def fold_cjk(text: str | None) -> str:
-    """把 CJK 连续段折叠成 单字+双字滑窗，空格分隔；其余字符原样保留。"""
-
-    def fold_run(run: str) -> str:
-        units = list(run) + [run[i : i + 2] for i in range(len(run) - 1)]
-        return " " + " ".join(units) + " "
-
-    return _CJK_RE.sub(lambda m: fold_run(m.group(0)), text or "")
-
-
-def init_fts(db: Session) -> None:
-    db.execute(text(DDL))
-    db.commit()
-
-
-def fts_insert(
-    db: Session,
-    file_id: int,
-    filename: str,
-    title: str | None,
-    notes: str,
-    tags: str,
-) -> None:
-    db.execute(
-        text(
-            "INSERT INTO files_fts (rowid, filename, title, notes, tags) "
-            "VALUES (:rowid, :filename, :title, :notes, :tags)"
-        ),
-        {
-            "rowid": file_id,
-            "filename": fold_cjk(filename),
-            "title": fold_cjk(title),
-            "notes": fold_cjk(notes),
-            "tags": fold_cjk(tags),
-        },
-    )
-
-
-def fts_update(
-    db: Session,
-    file_id: int,
-    filename: str,
-    title: str | None,
-    notes: str,
-    tags: str,
-) -> None:
-    db.execute(
-        text(
-            "UPDATE files_fts SET filename=:filename, title=:title, "
-            "notes=:notes, tags=:tags WHERE rowid=:rowid"
-        ),
-        {
-            "rowid": file_id,
-            "filename": fold_cjk(filename),
-            "title": fold_cjk(title),
-            "notes": fold_cjk(notes),
-            "tags": fold_cjk(tags),
-        },
-    )
-
-
-def fts_delete(db: Session, file_id: int) -> None:
-    db.execute(text("DELETE FROM files_fts WHERE rowid=:rowid"), {"rowid": file_id})
+def fts_values(meta: FileMeta) -> dict[str, str | None]:
+    """从 ORM 行提取索引列的字典（写端折叠由 FtsTable 内部完成）。"""
+    return {
+        "filename": meta.original_filename,
+        "title": meta.title,
+        "notes": meta.notes,
+        "tags": meta.tags,
+    }

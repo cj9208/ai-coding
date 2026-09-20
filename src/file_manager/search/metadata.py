@@ -4,9 +4,10 @@
 1. 严格：FTS 命中（词或前缀）∪ 每个关键词都作为子串出现
 2. 放宽：仅当严格一级 0 命中且关键词多于 1 个时，改成"任一关键词出现"
 
-FTS 表达式一律"每个词一个括号组"：`fold_cjk` 会把"财报"展开成 `财 财报 报`
-三个单元，不加括号时 `A B OR C D` 的 AND/OR 优先级会串味，把只含单个"报"字
-的文件也拽进来。
+FTS 表达式的构造（折叠 + 每词括号组 + ASCII 前缀通配）在通用层
+``storage.fts``；括号是 load-bearing 的：`fold_cjk` 会把"财报"展开成
+`财 财报 报` 三个单元，不加括号时 `A B OR C D` 的 AND/OR 优先级会串味，
+把只含单个"报"字的文件也拽进来。
 """
 
 from __future__ import annotations
@@ -14,7 +15,9 @@ from __future__ import annotations
 from sqlalchemy import and_, bindparam, func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
-from ..fts import fold_cjk
+from storage import match_expr
+from storage import token_expr as shared_token_expr
+
 from ..models import FileMeta
 from ..services.files import order_by_for
 from .base import SearchBackend, SearchHit, SearchQuery, SearchResult
@@ -51,26 +54,21 @@ def _ilike(token: str, column):
 
 
 def token_expr(token: str) -> str:
-    """单个关键词 → 折叠后的 FTS 子表达式（词内单元 AND，整体加括号）。
+    """单个关键词 → 折叠后的 FTS 子表达式（通用层实现，本域启用前缀通配）。
 
     纯 ASCII 词加前缀通配（`repo*`），折叠出来的 CJK 单元精确匹配。
     """
-    units = [
-        t + "*" if t.isascii() and t.isalnum() else t
-        for t in fold_cjk(token).split()
-        if t
-    ]
-    return f"({' AND '.join(units)})" if units else ""
+    return shared_token_expr(token, prefix=True)
 
 
 def build_match(q: str) -> str:
     """整句 → 词之间 AND 的 MATCH 表达式（严格一级）。"""
-    return " AND ".join(x for x in (token_expr(t) for t in _tokens(q)) if x)
+    return match_expr(_tokens(q), prefix=True)
 
 
 def build_match_any(q: str) -> str:
     """整句 → 词之间 OR 的 MATCH 表达式（放宽一级）。"""
-    return " OR ".join(x for x in (token_expr(t) for t in _tokens(q)) if x)
+    return match_expr(_tokens(q), joiner=" OR ", prefix=True)
 
 
 def _fts_cond(match: str):

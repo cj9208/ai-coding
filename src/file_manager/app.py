@@ -7,10 +7,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from storage import SqliteClient
+
 from . import models  # noqa: F401 - 注册 ORM 模型
 from .config import Settings, load_settings
-from .database import Base, get_db, make_engine, session_factory
-from .fts import init_fts
+from .database import Base, get_db
+from .fts import FILES_INDEX
 from .routers import api, pages
 
 PACKAGE_DIR = Path(__file__).parent
@@ -30,17 +32,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.files_dir.mkdir(parents=True, exist_ok=True)
 
-    engine = make_engine(settings.db_url)
-    Base.metadata.create_all(engine)
-    with session_factory(engine)() as db:
-        init_fts(db)
+    storage = SqliteClient(settings.db_url)
+    storage.init_schema(Base.metadata)
+    with storage.session() as db:
+        FILES_INDEX.create(db)
+        db.commit()
 
     templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
     templates.env.filters["dt"] = format_dt
 
     app = FastAPI(title="文件管理器")
     app.state.settings = settings
-    app.state.engine = engine
+    app.state.storage = storage
     app.state.templates = templates
 
     app.mount(
@@ -49,14 +52,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api.router)
     app.include_router(pages.router)
 
-    app.dependency_overrides[get_db] = _db_override(engine)
+    app.dependency_overrides[get_db] = _db_override(storage)
 
     return app
 
 
-def _db_override(engine):
+def _db_override(storage):
     def override():
-        with session_factory(engine)() as db:
+        with storage.session() as db:
             yield db
 
     return override
