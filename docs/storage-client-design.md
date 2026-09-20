@@ -2,7 +2,7 @@
 
 > 一句话核心：`src/storage` 是通用存储层——按数据库类型分模块（一类一个，目前用到的类型只有 SQLite），只收"怎么正确访问这类库"的知识（engine/PRAGMA/FTS5+CJK 折叠/补列式 schema 补丁/去重哈希）；各项目自己的表、ORM 模型、业务 store（如 `SessionStore`）留在原项目，不搬进来。
 
-日期：2026-09-20（v3）。状态：**共享层已实现；file_manager 与 ai_market_radar 已接入（代码完成）；research_agent 待其开发告一段落后接入**。日常怎么用见 [docs/storage-usage-guide.md](storage-usage-guide.md)，本文只管设计与现状。
+日期：2026-09-20（v3）。状态：**三批迁移全部落地并已 push——`1b6438c`（共享层）、`a84f3e0`（file_manager + ai_market_radar 接入）、`ea307ad`（research_agent 接入，其 storage 子包同时改名 persistence）**。同日结构收尾：默认数据目录统一锚定 repo root、radar/file_manager 的去重哈希改用 `storage.sha256_hex`。日常怎么用见 [docs/storage-usage-guide.md](storage-usage-guide.md)，本文只管设计与现状。
 
 ## 1. 背景：现状为什么需要这个层
 
