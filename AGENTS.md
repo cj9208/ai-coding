@@ -56,6 +56,14 @@ are already there). Env convention lives only in
 
 - Each project owns a SQLite file under `data/<project>/` (e.g.
   `data/ai_market_radar/kb.db`; `file_manager` respects `FM_DATABASE_URL`).
+- **Default data paths are anchored to the repo root**
+  (`REPO_ROOT = Path(__file__).resolve().parents[2]`, same expression in
+  `file_manager.config` / `research_agent.config` / `ai_market_radar.cli`),
+  never cwd-relative — launching elsewhere must not create a second DB.
+  Env vars (`FM_DATA_DIR`, `RESEARCH_AGENT_DATA_DIR`) and `--data-dir` still
+  override.
+- `src/utils/` is an intentionally kept shared-helper package (currently
+  `timer.py`) — more helpers are planned; don't prune it as dead code.
 - **FTS5 + CJK quirk (verified on this machine):** the default `unicode61`
   tokenizer drops CJK tokens; `trigram` and `editdist3` are unavailable.
   The `fold_cjk` folding now lives in the shared layer — build indexes with

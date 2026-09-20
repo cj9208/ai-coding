@@ -1,5 +1,17 @@
+from llm_client.settings import LLMSettings
 from pdf_summarizer.config import Config, load_config
 from pdf_summarizer.models import SummaryStyle
+
+# load_dotenv() has already pushed .env into os.environ at import time;
+# clear these so "defaults" tests assert the fallback, not the live config
+_LLM_ENV_KEYS = (
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+    "LLM_TEMPERATURE",
+    "LLM_TIMEOUT",
+    "LLM_MAX_RETRIES",
+)
 
 
 def test_config_defaults():
@@ -17,9 +29,15 @@ def test_config_defaults():
     assert c.api_key == ""
 
 
-def test_load_config_defaults():
+def test_load_config_defaults(monkeypatch):
+    for key in _LLM_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
     c = load_config()
-    assert c.model == "deepseek-chat"
+    defaults = LLMSettings()  # the repo-wide fallback contract
+    assert c.model == defaults.model
+    assert c.base_url == defaults.base_url
+    assert c.timeout == defaults.timeout
+    assert c.api_key == ""
 
 
 def test_load_config_overrides():
