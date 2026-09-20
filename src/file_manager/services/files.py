@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 import uuid
 from dataclasses import dataclass
@@ -12,6 +11,8 @@ from urllib.parse import urlencode
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
+
+from storage import sha256_hex
 
 from ..config import Settings
 from ..extractors import extract_for
@@ -131,7 +132,7 @@ def store_upload(
             f"文件超过大小限制（{settings.max_upload_mb}MB）",
         )
 
-    digest = hashlib.sha256(data).hexdigest()
+    digest = sha256_hex(data)
     existing = db.scalar(
         select(FileMeta).where(
             FileMeta.project_id == project_id, FileMeta.content_hash == digest

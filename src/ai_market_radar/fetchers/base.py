@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import html
 import re
 
 import httpx
+
+from storage import sha256_hex
 
 USER_AGENT = "ai-market-radar/0.1 (official-source knowledge base scanner)"
 TIMEOUT = httpx.Timeout(25.0, connect=10.0)
@@ -21,7 +22,7 @@ def make_client() -> httpx.Client:
 
 
 def sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return sha256_hex(text)
 
 
 def strip_html(text: str) -> str:
