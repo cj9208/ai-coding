@@ -29,7 +29,7 @@ from ..contracts.models import (
 from ..orchestrator.budget import BudgetView
 from ..orchestrator.machine import PhaseOutcome
 from ..orchestrator.view import SessionView
-from ..storage.store import SessionStore
+from ..persistence.store import SessionStore
 from .adapters.base import SourceAdapter
 from .collector import Collector
 from .planner import Planner

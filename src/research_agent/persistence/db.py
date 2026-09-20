@@ -3,15 +3,19 @@
 JSON-vs-column rule from the doc: artifacts stay JSON blobs (only kind +
 schema_version are queried); anything the *machine* filters on — dedup
 hashes, gap status, budget counters — gets real columns.
+
+Engine creation/PRAGMA/session factories used to live here; they are generic
+SQLite access knowledge and now come from the shared ``storage`` package
+(``storage.SqliteClient``) — per docs/storage-usage-guide.md §0, only business
+tables stay in the project.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Index, String, Text, create_engine, event
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy import Index, String, Text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 def utcnow() -> str:
@@ -109,29 +113,3 @@ class ReportRow(Base):
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
     path: Mapped[str] = mapped_column(String)
     rendered_at: Mapped[str] = mapped_column(String, default=utcnow)
-
-
-def make_engine(db_url: str) -> Engine:
-    engine = create_engine(
-        db_url,
-        connect_args=(
-            {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-        ),
-    )
-
-    @event.listens_for(engine, "connect")
-    def _pragma(dbapi_conn, _record):  # noqa: ANN001
-        cur = dbapi_conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA foreign_keys=ON")
-        cur.close()
-
-    return engine
-
-
-def init_db(engine: Engine) -> None:
-    Base.metadata.create_all(engine)
-
-
-def make_session_factory(engine: Engine) -> sessionmaker:
-    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)

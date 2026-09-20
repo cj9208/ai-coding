@@ -15,10 +15,10 @@ from .clarifying.agent import ClarifyingAgent
 from .contracts.models import Clarification, Question, QuestionAnswer, UserAnswers
 from .orchestrator import Orchestrator
 from .orchestrator.budget import Budget
+from .persistence import SessionStore
 from .recommendation.agent import RecommendationAgent
 from .research import ResearchAgent
 from .research.adapters import FakeAdapter, default_adapters
-from .storage import SessionStore
 
 
 def build_orchestrator(

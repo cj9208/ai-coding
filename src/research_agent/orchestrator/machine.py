@@ -22,7 +22,7 @@ from typing import Protocol
 from pydantic import BaseModel
 
 from ..contracts.models import PhaseName, UserAnswers
-from ..storage.store import SessionStore
+from ..persistence.store import SessionStore
 from .budget import Budget, BudgetView
 from .view import ArtifactError, SessionView
 

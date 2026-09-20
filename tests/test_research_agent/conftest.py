@@ -4,12 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from research_agent.storage import (
-    SessionStore,
-    init_db,
-    make_engine,
-    make_session_factory,
-)
+from research_agent.persistence import SessionStore
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -38,9 +33,7 @@ class ScriptedLLM:
 
 @pytest.fixture()
 def store(tmp_path) -> SessionStore:
-    engine = make_engine(f"sqlite:///{(tmp_path / 'agent.db').as_posix()}")
-    init_db(engine)
-    return SessionStore(make_session_factory(engine))
+    return SessionStore.open(tmp_path / "agent.db")
 
 
 @pytest.fixture()

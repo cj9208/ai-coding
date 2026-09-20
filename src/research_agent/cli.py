@@ -19,14 +19,12 @@ import uuid
 from .cli_support import build_orchestrator, collect_answers, render_questions
 from .config import DATA_DIR, DEFAULT_DB_URL
 from .contracts.models import ResearchBrief
-from .storage import SessionStore, init_db, make_engine, make_session_factory
+from .persistence import SessionStore
 
 
 def _store() -> SessionStore:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    engine = make_engine(DEFAULT_DB_URL)
-    init_db(engine)
-    return SessionStore(make_session_factory(engine))
+    return SessionStore.open(DEFAULT_DB_URL)
 
 
 async def _cmd_new(args) -> int:

@@ -26,8 +26,8 @@ from ..contracts.prompts import render_prompt
 from ..orchestrator.budget import BudgetView
 from ..orchestrator.machine import PhaseOutcome
 from ..orchestrator.view import SessionView
+from ..persistence.store import SessionStore
 from ..research.agent import synthesize_pack
-from ..storage.store import SessionStore
 from . import scorer
 from .profile import default_profile, finalize_profile
 from .report import render_markdown

@@ -23,7 +23,7 @@ from ..contracts.models import (
     SubQuery,
 )
 from ..contracts.prompts import render_prompt
-from ..storage.store import SessionStore
+from ..persistence.store import SessionStore
 from .adapters.base import AdapterError, SourceAdapter
 from .normalizer import SupportClusterer, claim_tokens, quote_ok
 

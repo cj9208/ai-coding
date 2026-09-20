@@ -109,7 +109,7 @@ file_manager 的测试则完全不感知：它给 `create_app` 传 `Settings(db_
 |---|---|---|
 | `file_manager` | 已接入 | `app.state.storage`；索引声明在 `fts.py`（`FILES_INDEX`） |
 | `ai_market_radar` | 已接入 | `KnowledgeBase` 内部（`store.py`） |
-| `research_agent` | **未接入**（MVP 开发中，告一段落后按设计文档 §4-M2 处理） | 其引擎工厂暂留在 `research_agent/storage/db.py` |
+| `research_agent` | 已接入 | `SessionStore.open(db_url)`（内部建 `SqliteClient` + create_all）；表定义在其 `persistence/db.py` |
 
 ## 7. 注意事项
 
@@ -117,5 +117,5 @@ file_manager 的测试则完全不感知：它给 `create_app` 传 `Settings(db_
 - WAL 会在库旁产生 `-wal`/`-shm` 边文件，属正常，`data/` 已在 .gitignore。
 - 外键约束现在对所有项目生效（原先 file_manager/research 有、radar 无）；radar 的库没有 FK 定义，无行为变化。
 - `FtsTable` 用外部 rowid 与业务表 id 对齐：删业务行前记得先 `delete` 索引行（file_manager 的 `delete_file` 是范例）。
-- research_agent 接入时，其子包 `research_agent/storage` 与顶层包 `storage` 建议改名避让（Python 绝对导入下不会真冲突，但读代码容易混）。
+- research_agent 的子包已按建议改名：`research_agent/storage` → `research_agent/persistence`（与顶层 `storage` 避免阅读混淆；Python 绝对导入下本不冲突）。
 - 将来若支持 Postgres：新增 `src/storage/postgres.py` 兄弟模块，**不要**给现有模块抽基类——抽象要等第二个真实后端出现才值得。
