@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}OCR 校对台{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">OCR 校对台</a>
+  {% block toolbar %}{% endblock %}
+  <div class="identity" id="identity"></div>
+</header>
+<main class="fill">
+  {% block content %}{% endblock %}
+</main>
+<script src="/static/identity.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

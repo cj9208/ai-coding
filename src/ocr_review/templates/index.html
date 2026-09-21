@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="list-page">
+  <h2>待校对文档</h2>
+  <p class="hint">来源目录：<code>{{ inbox }}</code>（<code>ocr-backend parse</code> 的产物，含随拷的源 PDF）</p>
+  {% if rows %}
+  <table>
+    <thead>
+      <tr><th>文档</th><th>页数</th><th>进度</th><th>模型</th><th>最后保存</th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>
+          <a href="/w/{{ r.ws_id }}">{{ r.stem }}</a>
+          {% if not r.source_ok %}<span class="tag warn" title="找不到源 PDF，页图无法渲染">缺源文件</span>{% endif %}
+        </td>
+        <td>{{ r.pages }}</td>
+        <td>
+          {% if r.done == r.pages %}<span class="tag ok">已完成</span>
+          {% elif r.done %}<span class="tag part">{{ r.done }}/{{ r.pages }}</span>
+          {% else %}<span class="tag">未开始</span>{% endif %}
+        </td>
+        <td>{{ r.model }}</td>
+        <td>{{ r.updated_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">收件箱为空。先跑一次
+    <code>ocr-backend parse &lt;文件&gt; --out {{ inbox }}</code>，
+    产物会自动出现在这里。</p>
+  {% endif %}
+</section>
+{% endblock %}

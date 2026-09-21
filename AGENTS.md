@@ -34,12 +34,17 @@ the others, except where noted below.
 - Run tests: `uv run pytest`. Async tests work via `asyncio_mode = "auto"`
   (no markers needed).
 - CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`,
-  `research-agent`, `ocr-backend` (`[project.scripts]`). `ocr-backend` has
-  three subcommands: `download <model>` (provisions a snapshot), `parse <file>
-  --out <dir>` (one-shot OCR runner entry point, writes `OcrDocument` JSON +
-  markdown), and `container build|download|parse [--gpu]` (shells out to the
+  `research-agent`, `ocr-backend`, `ocr-review` (`[project.scripts]`).
+  `ocr-backend` has three subcommands: `download <model>` (provisions a
+  snapshot), `parse <file> --out <dir>` (one-shot OCR runner entry point —
+  writes the `OcrDocument` JSON + markdown **and copies the source file
+  beside them**, so `out/` holds self-contained bundles the review UI can
+  pick up), and `container build|download|parse [--gpu]` (shells out to the
   Docker runner below so the compose invocation doesn't have to be retyped —
   see "Docker").
+- `ocr-review serve --inbox data/ocr_backend/out` runs the human-proofreading
+  web app over those bundles (see the subproject map); `ocr-review add <pdf>
+  --ocr <json>` registers a bundle that didn't come from `ocr-backend parse`.
 - `test_summarize_live` is the only test hitting a real LLM API (skipped when
   `LLM_API_KEY` unset). A 401 there means the key in `.env` is stale — an
   environment issue, not a code regression.
@@ -67,6 +72,7 @@ are already there). Env convention lives only in
 | `src/llm_client/` | shared LLM access point (see rule above) | — it *is* the LLM layer |
 | `src/storage/` | shared storage layer, one module per DB type in use (currently SQLite: `sqlite.py` engine/PRAGMA/session/ensure_columns/sha256_hex, `fts.py` fold_cjk/match_expr/FtsTable). Only generic access knowledge belongs here — table definitions and business stores stay in each project; see `docs/storage-usage-guide.md` | no |
 | `src/ocr_backend/` | shared OCR layer: one versioned `OcrDocument` contract (page → block, pixel bbox) + render projections (`page_text` / `document_markdown`); PaddleOCR-VL 1.6 is the first adapter (engine comes from the `paddle-cpu` / `paddle-gpu` extras; model snapshots live under `data/ocr_backend/models/<name>/`, provisioned by `ocr-backend download <name>` (each model is one `models.MODELS` entry, pinned to a commit sha) and resolved via `ocr_backend.models.model_dir`; see `docs/ocr-backend-design.md` §7 for the GPU index gotcha). Consumers read the contract, never a backend's native output | no |
+| `src/ocr_review/` | human-proofreading UI for OCR output (FastAPI + Jinja + vanilla JS, no build chain, no DB, no auth — same posture as file_manager). Loads `ocr-backend parse` bundles from an inbox dir, shows PDF page rasters (PyMuPDF, rendered to the contract's exact pixel grid) with an SVG block overlay, and records fixes as a **sparse sidecar** `review.json` keyed by (page, block id) — the machine JSON is never mutated, so the ground-truth pairing survives. `patch.apply_review` folds the overlay into a corrected `OcrDocument` on export; `patch.reanchor` re-matches entries (IoU + text ratio) after a model re-run shifts ids. Workspaces under `data/ocr_review/<sha12>/`; design doc `docs/ocr-review-ui-exploration.md` | no |
 | `src/pdf_summarizer/` | CLI: PDF → chunks → map-reduce summary | yes, via `llm_client` |
 | `src/ai_market_radar/` | scans OpenAI/Anthropic/Copilot **news sources** into SQLite, digest of new items. "OpenAI" here is a watched entity, not a dependency. Deterministic parsing on purpose — no LLM | no |
 | `src/file_manager/` | FastAPI file manager, metadata-first search (FTS5) | no |

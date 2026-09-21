@@ -24,6 +24,12 @@ of truth for completed work.
 
 ## Known gaps in what shipped
 
+- [ ] **ocr-review: one real mouse drag-to-add-block in a visible browser
+      window.** Everything else (pixel alignment, corrected/rejected/added
+      blocks, save/409, export) was verified end-to-end, but the headless
+      browser here can only dispatch synthetic pointer events — start
+      `uv run ocr-review serve` and draw one box on http://127.0.0.1:8765 to
+      close the gap.
 - [ ] `ocr-backend container parse` does not forward `--raw-dir`, so seeing
       Paddle's native per-page JSON still requires the raw Compose command
       (docs §1.1 lists the workaround). Add the flag, or drop the claim.

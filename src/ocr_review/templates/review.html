@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}校对 {{ stem }} - OCR 校对台{% endblock %}
+{% block content %}
+<div id="review-root" data-ws="{{ ws_id }}" data-stem="{{ stem }}">
+  <div class="canvas-col">
+    <div class="page-bar">
+      <button id="btn-prev" class="ghost" title="上一页">‹</button>
+      <select id="page-select"></select>
+      <button id="btn-next" class="ghost" title="下一页">›</button>
+      <label class="zoom">缩放 <input type="range" id="zoom" min="40" max="220" value="100"></label>
+      <label class="done"><input type="checkbox" id="btn-done"> 本页已校对</label>
+      <span class="spacer"></span>
+      <button id="btn-add" title="空白处拖框新增一个漏检块">框选新增</button>
+      <span id="save-status" class="status"></span>
+      <button id="btn-save">保存</button>
+      <button id="btn-export" class="ghost">导出修订版</button>
+    </div>
+    <div class="canvas-scroll" id="canvas-scroll">
+      <div class="canvas-wrap" id="canvas-wrap">
+        <img id="page-img" alt="页面图">
+        <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+    </div>
+  </div>
+  <aside class="side-col">
+    <ul id="blocklist" class="blocklist"></ul>
+    <section id="editor" class="editor" hidden>
+      <header>
+        <strong id="ed-title">块</strong>
+        <span id="ed-state-chip" class="tag"></span>
+        <span class="spacer"></span>
+        <button id="ed-keep" class="ghost">接受</button>
+        <button id="ed-reject" class="ghost danger">删除块</button>
+        <button id="ed-reset" class="ghost">撤销人工</button>
+      </header>
+      <div class="field"><label>kind</label>
+        <select id="ed-kind"></select>
+        <label class="inline">后端标签</label><span id="ed-raw" class="mono"></span>
+      </div>
+      <div class="field"><label>格式</label>
+        <select id="ed-format"></select>
+        <label class="inline">order</label><input id="ed-order" type="number" step="1" size="4">
+        <label class="inline">分</label><span id="ed-score" class="mono"></span>
+      </div>
+      <div class="field"><label>内容</label>
+        <details id="ed-orig-box"><summary>机器原文</summary><pre id="ed-orig" class="mono"></pre></details>
+        <textarea id="ed-content" rows="8" spellcheck="false"></textarea>
+      </div>
+      <div class="field"><label>备注</label><input id="ed-note" type="text" placeholder="为什么改（可选）"></div>
+      <div class="field"><button id="ed-preview" class="ghost">预览</button>
+        <iframe id="ed-render" sandbox="" hidden></iframe></div>
+    </section>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/review.js"></script>
+{% endblock %}
