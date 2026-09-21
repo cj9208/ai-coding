@@ -21,6 +21,7 @@ import random
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from ocr_backend.contract import (
     BlockKind,
@@ -385,7 +386,7 @@ def generate_corpus(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     golden_path = out_dir.parent / "golden.jsonl"
-    doc_meta: list[tuple[int, dict, list[str]]] = []
+    doc_meta: list[tuple[int, dict, Any]] = []
 
     t0 = time.monotonic()
     for i in range(n_docs):
