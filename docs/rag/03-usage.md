@@ -9,8 +9,8 @@ The complete `rag` CLI reference. For what the stages guarantee read
   `ocr-backend parse <file> --out <dir>` (the default inbox is
   `data/ocr_backend/out`). A `*.review.json` sidecar beside a bundle is
   folded in automatically and upgrades the document's trust.
-- **LLM env** — only `rag query` (answering) and `rag build --enrich` touch
-  the model; they read `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` from the
+- **LLM env** — only `rag query` (answering) and `rag enrich` touch the
+  model; they read `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` from the
   repo-root `.env` (shared `llm_client` convention). `--retrieve-only` and
   plain builds need nothing.
 - Install: the `rag` entry point ships with the editable project install;
@@ -21,11 +21,16 @@ The complete `rag` CLI reference. For what the stages guarantee read
 ```text
 rag [--data-dir PATH] COMMAND ...
 
-  build   [--inbox DIR] [--enrich] [--trace]   offline: ingest → chunk → publish
-  status                                        snapshot / document overview
+  build   [--inbox DIR] [--trace]                offline: ingest + publish
+  ingest  [--inbox DIR] [--limit N] [--trace]    stage new/changed docs from inbox
+  publish                                        run the diff transaction (staged -> active)
+  enrich  [--limit N] [--prompt-ver V] [--workers N]  LLM-annotate unenriched chunks
+  retract <doc_id>                               mark a doc for removal at next publish
+  gc      [--keep N]                             prune old snapshots and orphaned chunks
+  status                                         snapshot / document overview
   query   QUESTION [-k N] [--retrieve-only] [--trace]   retrieval (+ answer)
-  eval    GOLDEN.jsonl [-k N] [--trace]         metrics on a golden set
-  traces  [FILE] [-n N]                         list / render run traces
+  eval    GOLDEN.jsonl [-k N] [--trace]          metrics on a golden set
+  traces  [FILE] [-n N]                          list / render run traces
 ```
 
 `--data-dir` defaults to `data/rag/` at the repo root; the SQLite file,
@@ -37,16 +42,83 @@ rag [--data-dir PATH] COMMAND ...
 uv run rag build --inbox data/ocr_backend/out
 ```
 
-Deterministic; the only non-deterministic knob is `--enrich`. Each run
-stages a **new corpus_version** and publishes atomically — old snapshots
-survive, so re-running after editing review files is always safe. Prints a
-JSON report (`bundles`, `decisions`, `doc_count`, `chunk_count`, `errors`);
-a bundle that fails to parse lands in `errors` and the rest still builds
-(exit 1 flags that).
+A thin compose of `ingest` + `publish` — kept for tests and toy corpora.
+For production use, run `ingest` and `publish` separately (see below).
+Deterministic; prints a JSON report (`bundles`, `decisions`, `doc_count`,
+`chunk_count`, `errors`, `corpus_version`, `staged_added`,
+`retracted_removed`); a bundle that fails to parse lands in `errors` and
+the rest still builds (exit 1 flags that).
 
-`--enrich` adds an LLM annotation pass (title/keywords/summary per child
-chunk, ≤500 chunks) that enters the FTS row — the vocabulary-mismatch
-mitigation that comes *before* vectors. Expect it to be the slow part.
+### ingest
+
+```bash
+uv run rag ingest --inbox data/ocr_backend/out
+uv run rag ingest --limit 10          # stop after 10 bundles
+```
+
+Scans the inbox, skips bundles already staged/live with the current
+pipeline fingerprint (idempotent), chunks new/changed docs, and stages
+them. Each run is deterministic; prints a JSON report (`bundles`,
+`decisions`, `chunked_docs`, `skipped_docs`, `errors`). A broken bundle
+skips with an error line, it never kills the ingest.
+
+### publish
+
+```bash
+uv run rag publish
+```
+
+Runs the diff transaction: copies the active manifest, adds staged docs,
+removes retracted docs, diffs FTS, inserts the snapshot row, flips
+`meta.active_version`. Prints a JSON report (`corpus_version`,
+`doc_count`, `chunk_count`, `staged_added`, `retracted_removed`). Readers
+never see a half-built index.
+
+### enrich
+
+```bash
+uv run rag enrich
+uv run rag enrich --limit 100         # stop after 100 chunks
+uv run rag enrich --workers 8         # 8 concurrent LLM calls
+uv run rag enrich --prompt-ver enrich_v2   # use a different prompt version
+```
+
+Independent background step: scans live child chunks lacking an `inferred`
+row for the current prompt version, calls the LLM concurrently via
+`TaskQueue` (default 4 workers), and persists results to the `inferred`
+table (checkpoint-per-chunk — a crash loses at most one LLM call). After
+enrichment, refreshes the affected FTS rows so the new keywords/summary
+enter the index.
+
+Prints a JSON report (`prompt_ver`, `pending`, `enriched`, `errors`,
+`docs_refreshed`). Without `rag enrich` the pipeline stays fully
+deterministic; chunks are searchable via the FTS fallback (section_path
+title, empty keywords / summary).
+
+### retract
+
+```bash
+uv run rag retract d_abc123def456
+```
+
+Marks a document for removal at the next `publish`. The doc's
+`ingest_state` flips to `retracted`; the next publish removes it from the
+manifest and deletes its FTS rows. The chunks themselves survive until
+`gc` prunes them.
+
+### gc
+
+```bash
+uv run rag gc
+uv run rag gc --keep 5         # retain the 5 most recent snapshots
+```
+
+Garbage-collects old snapshots and orphaned chunks. Retains the N most
+recent snapshots (default 3), deletes `snapshot_docs` rows older than
+that, deletes chunks not referenced by any retained snapshot, deletes
+`inferred` rows not referencing any live chunk, and deletes old
+`snapshots` rows. Prints a JSON report (`chunks_deleted`,
+`inferred_deleted`, `snapshots_pruned`).
 
 ### status
 
@@ -138,11 +210,17 @@ did it abstain" (relaxed flag, n_candidates) without rerunning anything.
 The CLI is a thin shell; the composition roots are importable:
 
 ```python
-from rag.pipeline import build
+from rag.pipeline import build, ingest, publish
 from rag.engine import retrieve
 from rag.answer import generate
 
+# Full pipeline (for tests / toy corpora)
 report = build(inbox, data_dir)              # dict, same shape as CLI JSON
+
+# Production use: separate ingest and publish
+ingest_report = ingest(inbox, data_dir)      # stage new/changed docs
+publish_report = publish(data_dir)           # run the diff transaction
+
 pack = retrieve(store, "问题", k=5)          # EvidencePack; insufficient flag honored
 answer = asyncio.run(generate(pack, "问题"))  # Answer(outcome, claims[...])
 ```

@@ -56,7 +56,7 @@ OcrDocument ──► CanonicalDoc ──► Chunk[] ──► Candidate[] ─�
 | `EvidencePack` | ordered chunks, citation anchors `[1..n]`, `strength` (hit count + best score profile) | `strength` is the abstention input CH03_04 demands — insufficiency is decided by retrieval numbers, not by the generator's mood |
 | `Answer` | `outcome ∈ {answered, partial, clarify, insufficient, escalated}`, `claims[{text, refs}]` | claims carry citation refs so integrity is checkable *after* generation |
 
-## Storage: one SQLite file, five tables
+## Storage: one SQLite file, eight tables
 
 `data/rag/kb.db` (REPO_ROOT-anchored, `--data-dir` overrides). All schema
 knowledge lives in `src/storage` conventions: WAL/PRAGMA via
@@ -64,14 +64,20 @@ knowledge lives in `src/storage` conventions: WAL/PRAGMA via
 
 ```sql
 documents(doc_id PK, source_sha256, source_path, extractor, reviewed,
-          publish_decision, trust_level, risk_flags, quality, canonical_json)
-chunks(chunk_id PK, doc_rowid, corpus_version, chunk_type, is_parent,
+          publish_decision, risk_flags, quality, page_count, created_at,
+          ingest_state, chunked_with_fp, chunk_count)
+chunks(chunk_id PK, pipeline_fp, doc_id FK, chunk_type, is_parent,
        parent_chunk_id, section_path, page_start, page_end, block_keys,
-       text, structured_payload, trust_level, inferred, content_hash)
+       text, structured_payload, trust_level, content_hash)
+snapshot_docs(corpus_version, doc_id, pipeline_fp,
+              PRIMARY KEY (corpus_version, doc_id))  -- manifest rows
+inferred(chunk_id, prompt_ver, title, keywords, summary, created_at,
+         PRIMARY KEY (chunk_id, prompt_ver))          -- enrich side projection
 chunks_fts(title, body, section_path, keywords, summary)   -- FtsTable, rowid = chunks.rowid
-embeddings(chunk_id, model_id, dim, vector, embedded_at)   -- empty in M1, see below
+embeddings(chunk_id, model_id, dim, vector, embedded_at)   -- empty in M1
 snapshots(corpus_version PK, published_at, doc_count, chunk_count,
           representations)                                  -- {"fts":"ready","vector":"absent@bge-m3"}
+meta(key PK, value)                                         -- active_version pointer
 ```
 
 Three deliberate calls:
@@ -84,15 +90,19 @@ Three deliberate calls:
    runs registered ones. This is what "adding embedding later = one separate
    backfill job + one new CandidatePath file" mechanically means.
 2. **chunk_id is content-addressed**:
-   `sha256(doc_id | section_path | block_keys)[:12]`. Ids must survive a
-   rebuild when text is unchanged, or future embedding rows silently orphan
-   (the whole plug-in model bets on this key space). `content_hash` lets a
-   backfill diff which chunks actually moved.
-3. **Publish = one transaction**: stage chunks under a new `corpus_version`,
-   then atomically (same `BEGIN IMMEDIATE`) replace the FTS rows with the
-   new version's chunks and record the snapshot. Readers never see a
-   half-built index — CH03_02's "publish only coherent snapshots", achieved
-   with SQLite's own atomicity instead of a staging dance.
+   `sha256(pipeline_fp | doc_id | section_path | block_keys)[:12]`. Ids must
+   survive a rebuild when text is unchanged, or future embedding rows
+   silently orphan (the whole plug-in model bets on this key space).
+   `pipeline_fp` in the id means a settings change produces new ids — the
+   same ingest loop then produces a corpus-wide diff naturally.
+   `content_hash` lets a backfill diff which chunks actually moved.
+3. **Publish = one diff transaction**: copy the active manifest
+   (`snapshot_docs` rows), add staged docs, remove retracted docs, diff FTS
+   (upsert added, delete removed), insert snapshot row, flip
+   `meta.active_version`. Readers never see a half-built index — CH03_02's
+   "publish only coherent snapshots", achieved with SQLite's own atomicity.
+   A full rebuild is the degenerate case (pipeline_fp change ⇒ every id
+   changes ⇒ the diff covers everything).
 
 ## The five protocol seams (each with exactly one implementation)
 
@@ -101,13 +111,20 @@ Acquirer      .fetch(bundle_paths) -> list[CanonicalDoc]      # OcrBundleAcquire
 ChunkStrategy .split(doc) -> list[Chunk]                      # StructureAwareChunker
 QueryShaper   .shape(query) -> ShapedQuery(tokens)            # LexicalShaper (deterministic)
 CandidatePath .search(shaped, k) -> list[Candidate]           # Fts5Path  (+ name attr)
-EnrichProvider.enrich(chunks) -> None (fills chunk.inferred)  # LlmEnricher (opt-in --enrich)
+EnrichProvider.enrich(chunks) -> None (fills chunk.inferred)  # LlmEnricher (independent background step)
 ```
 
 No second implementation is pre-written. An interface validated only by one
 implementation is a guess, and internal code has no compatibility burden —
 if the vector path needs the protocol bent, bending it is cheaper than
 maintaining a dead adapter.
+
+Enrich runs as `rag enrich`, not as part of `build`. It scans unenriched
+child chunks, calls the LLM concurrently via `TaskQueue` (default 4
+workers), and persists results to the `inferred` table keyed by
+`prompt_ver` — a prompt change triggers re-enrichment of affected chunks
+without touching the pipeline fingerprint (enrich is a rebuildable
+projection, not a boundary-affecting setting).
 
 ## Why lexical-only is a legitimate M1, not a placeholder
 
@@ -173,13 +190,16 @@ shaping; wrong context size → ChunkStrategy).
 
 ## Milestones
 
-- **M1 (this package)**: vertical slice — build/query/eval/status CLI,
-  lexical path, enrichment optional behind `--enrich`.
+- **M1 (shipped)**: vertical slice — build/query/eval/status/traces CLI,
+  lexical path, enrich as independent background step (`rag enrich`).
+- **M1+ (shipped)**: incremental pipeline (schema v2) — manifest +
+  fingerprint, diff publish, separate ingest/publish/retract/gc commands.
+  Full rebuild is the degenerate case (pipeline_fp change).
 - **M2**: `EmbeddingProvider` + `rag embed-backfill` + `DensePath` + real
   RRF — only after M1's eval shows what lexical misses.
 - **M3**: rerank slot + query shaping upgrades.
 - **M4**: ground `rag query` behind a CH01-style intention gate when the
-  orchestration capability is built.
+  orchestration capabilities are built.
 
 ## Deferred decisions (from incremental design)
 
@@ -201,4 +221,4 @@ questions; the decisions affect this document's future milestones:
 
 Moved to `03-usage.md` (the full CLI reference). Tests:
 `uv run pytest tests/test_rag` — model-free (LLM paths are
-monkeypatched); the LLM is only reached by explicit `--enrich` / answering.
+monkeypatched); the LLM is only reached by explicit `rag enrich` / answering.
