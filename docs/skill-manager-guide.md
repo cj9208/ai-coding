@@ -111,6 +111,7 @@ overrides from the tracked skills/ directory:
 - **为什么"剪枝"算安装的一部分**：把目标目录建成计划的**完整视图**，才能顺手解决上游改名留下的僵尸目录——旧 copy 和新 copy 并排存在，正是手工同步的布局不可信的原因。
 - **为什么一个 clone 有本地改动时要报错而不是覆盖**：这台机器上的未提交改动对 git 不可见，`checkout` 会静默吃掉它们。宁可停下来让人决定搬去哪。
 - **为什么扫描靠 `SKILL.md` 而不是清单**：判据来自被 vendored 仓库自己的约定，上游加/删 skill 不需要改本仓库任何代码。
+- **为什么两个生成视图必须待在 index 之外**：`.gitignore` 只对**未跟踪**文件生效——某条路径一旦在加规则之前进过 git，之后每次 `sync` 重写它都会产生一次真实 diff，看起来像有人在手改生成物，而设计的前提是这些目录随时可删可重建。自查一行：`git ls-files repo-skills .opencode` 应当什么都不输出；输出就说明有漏网的，用 `git rm --cached <路径>` 请出去（文件留在磁盘上，`skills sync` 本来就重建得出来）。本仓库的 `.opencode/skills/openspec-{apply,archive,proposal}/SKILL.md` 就是这么三个历史遗留（早于 `.gitignore` 规则），已按此取消跟踪。
 
 ## 6. 与 `specs/` 的关系
 

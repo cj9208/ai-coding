@@ -157,6 +157,9 @@ are already there). Env convention lives only in
   moved), `skills add <repo>` clones a new upstream and prints the declaration
   to paste. The two generated views — `repo-skills/` clones and
   `.opencode/skills/` installs — are never hand-edited and stay gitignored.
+  Being gitignored is not the same as being untracked: `git ls-files repo-skills
+  .opencode` must print nothing, and a stray path goes out with
+  `git rm --cached` (the files are on disk because `sync` rebuilds them).
   How-tos, error-message decoding, and the rationale for each choice are in
   `docs/skill-manager-guide.md`.
 - What gets installed is one tracked table: `sources.UPSTREAMS`, one entry per
