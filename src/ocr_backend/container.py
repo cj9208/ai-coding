@@ -105,6 +105,7 @@ def parse(
     source: str | Path,
     *,
     out_dir: str | Path | None = None,
+    raw_dir: str | Path | None = None,
     gpu: bool = False,
     device: str | None = None,
 ) -> int:
@@ -112,7 +113,9 @@ def parse(
 
     ``source`` must live under ``IN_DIR`` (see module docstring); ``out_dir``
     defaults to ``OUT_DIR`` and must likewise live under it, so the container
-    writes straight onto the host filesystem.
+    writes straight onto the host filesystem. ``raw_dir`` (Paddle's native
+    per-page JSON) must also live under ``OUT_DIR`` — ``/work/out`` is the
+    only mount the container can write to.
     """
     _require_docker()
     IN_DIR.mkdir(parents=True, exist_ok=True)
@@ -122,7 +125,6 @@ def parse(
     out.mkdir(parents=True, exist_ok=True)
     container_out = _to_mount(out, OUT_DIR, _OUT_MOUNT)
 
-    device = device or ("gpu" if gpu else "cpu")
     cmd = _compose(
         "run",
         "--rm",
@@ -131,10 +133,15 @@ def parse(
         container_in,
         "--out",
         container_out,
-        "--device",
-        device,
         gpu=gpu,
     )
+    if raw_dir is not None:
+        raw = Path(raw_dir)
+        container_raw = _to_mount(raw, OUT_DIR, _OUT_MOUNT)
+        raw.mkdir(parents=True, exist_ok=True)
+        cmd += ["--raw-dir", container_raw]
+    device = device or ("gpu" if gpu else "cpu")
+    cmd += ["--device", device]
     # Both paths come from _to_mount, which prefixes them with the mount root,
     # so a crafted filename cannot reach docker as anything but a path.
     returncode = subprocess.run(cmd).returncode  # nosec B603

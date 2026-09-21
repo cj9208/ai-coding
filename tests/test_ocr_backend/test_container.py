@@ -103,6 +103,51 @@ def test_parse_rejects_input_outside_the_mounted_in_dir(monkeypatch, tmp_path):
         container.parse(outside)
 
 
+def test_parse_forwards_raw_dir_under_the_out_mount(monkeypatch, fake_run, tmp_path):
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    (in_dir / "scan.pdf").write_bytes(b"x")
+    monkeypatch.setattr(container, "IN_DIR", in_dir)
+    monkeypatch.setattr(container, "OUT_DIR", out_dir)
+
+    container.parse(in_dir / "scan.pdf", raw_dir=out_dir / "scan_raw")
+
+    cmd = fake_run.calls[0]
+    assert cmd[cmd.index("--raw-dir") + 1] == "/work/out/scan_raw"
+    assert (out_dir / "scan_raw").is_dir()
+
+
+def test_parse_rejects_raw_dir_outside_the_out_mount(monkeypatch, fake_run, tmp_path):
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    (in_dir / "scan.pdf").write_bytes(b"x")
+    monkeypatch.setattr(container, "IN_DIR", in_dir)
+    monkeypatch.setattr(container, "OUT_DIR", tmp_path / "out")
+
+    with pytest.raises(ValueError, match="not under"):
+        container.parse(in_dir / "scan.pdf", raw_dir=tmp_path / "raw")
+    assert fake_run.calls == []
+
+
+def test_cli_container_parse_forwards_raw_dir(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_parse(source, **kwargs):
+        seen["source"] = source
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(container, "parse", fake_parse)
+
+    rc = cli.main(
+        ["container", "parse", str(tmp_path / "scan.pdf"), "--raw-dir", "raw"]
+    )
+
+    assert rc == 0
+    assert seen["raw_dir"] == "raw"
+
+
 def test_missing_docker_reports_install_hint_without_running_anything(monkeypatch):
     monkeypatch.setattr(container.shutil, "which", lambda name: None)
     called = []

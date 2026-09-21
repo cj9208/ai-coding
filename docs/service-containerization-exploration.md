@@ -40,7 +40,7 @@ ocr-backend container parse data/ocr_backend/in/scan.pdf
 | 用 GPU | 三条命令都加 `--gpu`（同时切换 profile、服务名和默认 `--device gpu`） |
 | 结果分目录 | `--out data/ocr_backend/out/batch1`——必须是 `out/` 下的子目录，容器只看得见这块挂载 |
 | 报错 `not under .../in` | 把文件挪进 `data/ocr_backend/in/`；那是唯一挂进容器的输入目录（见 `src/ocr_backend/container.py`） |
-| 调试要看引擎原生输出 | 直接用原始 Compose 命令加 `--raw-dir`（§3.1），wrapper 暂未透传该参数 |
+| 调试要看引擎原生输出 | `ocr-backend container parse <file> --raw-dir data/ocr_backend/out/<stem>_raw`——原生长 JSON 直接落宿主 `out/` 下（wrapper 已透传该参数） |
 | 本机已有 OCR 环境，不想过容器 | `uv sync --extra ocr --extra paddle-cpu` 后直接 `ocr-backend parse <file> --out <dir>` |
 
 第一次 `build` 会慢（Paddle CPU wheel 约 190 MB），但依赖层与代码层分开缓存，之后改 `src/` 不需要重装依赖。注意：这三条命令在真实 Docker 上还没跑过——§8 的第 3、4 项验收仍待有 Docker Desktop 的机器执行，本文不为它们背书。

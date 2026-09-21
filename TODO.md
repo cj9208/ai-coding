@@ -30,9 +30,6 @@ of truth for completed work.
       browser here can only dispatch synthetic pointer events — start
       `uv run ocr-review serve` and draw one box on http://127.0.0.1:8765 to
       close the gap.
-- [ ] `ocr-backend container parse` does not forward `--raw-dir`, so seeing
-      Paddle's native per-page JSON still requires the raw Compose command
-      (docs §1.1 lists the workaround). Add the flag, or drop the claim.
 - [ ] `scripts/verify_paddle_vl_16.py` is still untracked. It produced the
       engine facts the adapter documents, so it is either worth committing or
       worth deleting — keeping it untracked means the evidence trail for

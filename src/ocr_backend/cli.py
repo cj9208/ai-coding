@@ -169,6 +169,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     cp.add_argument("--gpu", action="store_true", help="run the GPU image")
     cp.add_argument("--device", default=None, help="override cpu/gpu detection")
+    cp.add_argument(
+        "--raw-dir",
+        default=None,
+        help="also save Paddle's own per-page JSON here, for debugging"
+        f" (must live under {container.OUT_DIR})",
+    )
 
     args = parser.parse_args(argv)
 
@@ -218,7 +224,11 @@ def _run_container(args: argparse.Namespace) -> int:
             return container.download_model(args.model, gpu=args.gpu)
         if args.container_cmd == "parse":
             return container.parse(
-                args.source, out_dir=args.out, gpu=args.gpu, device=args.device
+                args.source,
+                out_dir=args.out,
+                raw_dir=args.raw_dir,
+                gpu=args.gpu,
+                device=args.device,
             )
     except (RuntimeError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
