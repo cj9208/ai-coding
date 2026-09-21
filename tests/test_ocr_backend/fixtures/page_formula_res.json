@@ -1,0 +1,308 @@
+{
+    "input_path": "C:\\Users\\cjdyx\\Downloads\\Code_Repo\\ai-coding\\data\\ocr_backend\\verify\\materials\\verify_doc.pdf",
+    "page_index": 2,
+    "page_count": 5,
+    "width": 1191,
+    "height": 1684,
+    "model_settings": {
+        "use_doc_preprocessor": false,
+        "use_layout_detection": true,
+        "use_chart_recognition": false,
+        "use_seal_recognition": false,
+        "use_ocr_for_image_block": false,
+        "format_block_content": false,
+        "merge_layout_blocks": true,
+        "markdown_ignore_labels": [
+            "number",
+            "footnote",
+            "header",
+            "header_image",
+            "footer",
+            "footer_image",
+            "aside_text"
+        ],
+        "return_layout_polygon_points": true
+    },
+    "parsing_res_list": [
+        {
+            "block_label": "display_formula",
+            "block_content": " $$ \\mathrm{L}=1/2\\uprho v^{2}\\mathrm{~S~C~}_{-}\\mathrm{L} $$ ",
+            "block_bbox": [
+                116,
+                150,
+                361,
+                189
+            ],
+            "block_id": 0,
+            "block_order": 1,
+            "group_id": 0,
+            "block_polygon_points": [
+                [
+                    116.0,
+                    150.0
+                ],
+                [
+                    361.0,
+                    150.0
+                ],
+                [
+                    361.0,
+                    189.0
+                ],
+                [
+                    116.0,
+                    189.0
+                ]
+            ]
+        },
+        {
+            "block_label": "formula_number",
+            "block_content": "(1)",
+            "block_bbox": [
+                1038,
+                153,
+                1083,
+                190
+            ],
+            "block_id": 1,
+            "block_order": 2,
+            "group_id": 1,
+            "block_polygon_points": [
+                [
+                    1038.0,
+                    153.0
+                ],
+                [
+                    1083.0,
+                    153.0
+                ],
+                [
+                    1083.0,
+                    190.0
+                ],
+                [
+                    1038.0,
+                    190.0
+                ]
+            ]
+        },
+        {
+            "block_label": "text",
+            "block_content": "The lift equation above relates the lift force to air density, velocity and wing area. An inline formula  $ a^{2} + b^{2} = c^{2} $ appears in this paragraph to check whether inline formulas are treated differently from display formulas.",
+            "block_bbox": [
+                114,
+                284,
+                1000,
+                377
+            ],
+            "block_id": 2,
+            "block_order": 3,
+            "group_id": 2,
+            "block_polygon_points": [
+                [
+                    114.0,
+                    284.0
+                ],
+                [
+                    1000.0,
+                    284.0
+                ],
+                [
+                    1000.0,
+                    377.0
+                ],
+                [
+                    114.0,
+                    377.0
+                ]
+            ]
+        },
+        {
+            "block_label": "number",
+            "block_content": "page 3",
+            "block_bbox": [
+                98,
+                1609,
+                155,
+                1630
+            ],
+            "block_id": 3,
+            "block_order": null,
+            "group_id": 3,
+            "block_polygon_points": [
+                [
+                    98.0,
+                    1609.0
+                ],
+                [
+                    154.0,
+                    1609.0
+                ],
+                [
+                    154.0,
+                    1629.0
+                ],
+                [
+                    98.0,
+                    1629.0
+                ]
+            ]
+        }
+    ],
+    "layout_det_res": {
+        "input_path": null,
+        "page_index": null,
+        "boxes": [
+            {
+                "cls_id": 5,
+                "label": "display_formula",
+                "score": 0.8204590678215027,
+                "coordinate": [
+                    116,
+                    150,
+                    361,
+                    189
+                ],
+                "order": 1,
+                "polygon_points": [
+                    [
+                        116.0,
+                        150.0
+                    ],
+                    [
+                        361.0,
+                        150.0
+                    ],
+                    [
+                        361.0,
+                        189.0
+                    ],
+                    [
+                        116.0,
+                        189.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 11,
+                "label": "formula_number",
+                "score": 0.8008226156234741,
+                "coordinate": [
+                    1038,
+                    153,
+                    1083,
+                    190
+                ],
+                "order": 2,
+                "polygon_points": [
+                    [
+                        1038.0,
+                        153.0
+                    ],
+                    [
+                        1083.0,
+                        153.0
+                    ],
+                    [
+                        1083.0,
+                        190.0
+                    ],
+                    [
+                        1038.0,
+                        190.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.9169803857803345,
+                "coordinate": [
+                    114,
+                    284,
+                    1000,
+                    377
+                ],
+                "order": 3,
+                "polygon_points": [
+                    [
+                        114.0,
+                        284.0
+                    ],
+                    [
+                        1000.0,
+                        284.0
+                    ],
+                    [
+                        1000.0,
+                        377.0
+                    ],
+                    [
+                        114.0,
+                        377.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 15,
+                "label": "inline_formula",
+                "score": 0.8174750208854675,
+                "coordinate": [
+                    196,
+                    315,
+                    309,
+                    340
+                ],
+                "order": 4,
+                "polygon_points": [
+                    [
+                        196.0,
+                        315.0
+                    ],
+                    [
+                        309.0,
+                        315.0
+                    ],
+                    [
+                        309.0,
+                        340.0
+                    ],
+                    [
+                        196.0,
+                        340.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 16,
+                "label": "number",
+                "score": 0.7903950214385986,
+                "coordinate": [
+                    98,
+                    1609,
+                    155,
+                    1630
+                ],
+                "order": 5,
+                "polygon_points": [
+                    [
+                        98.0,
+                        1609.0
+                    ],
+                    [
+                        154.0,
+                        1609.0
+                    ],
+                    [
+                        154.0,
+                        1629.0
+                    ],
+                    [
+                        98.0,
+                        1629.0
+                    ]
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,41 @@
+{
+    "input_path": "C:\\Users\\cjdyx\\Downloads\\Code_Repo\\ai-coding\\data\\ocr_backend\\verify\\materials\\page1.png",
+    "page_index": null,
+    "page_count": null,
+    "width": 1241,
+    "height": 1754,
+    "model_settings": {
+        "use_doc_preprocessor": false,
+        "use_layout_detection": false,
+        "use_chart_recognition": false,
+        "use_seal_recognition": false,
+        "use_ocr_for_image_block": false,
+        "format_block_content": false,
+        "merge_layout_blocks": true,
+        "markdown_ignore_labels": [
+            "number",
+            "footnote",
+            "header",
+            "header_image",
+            "footer",
+            "footer_image",
+            "aside_text"
+        ],
+        "return_layout_polygon_points": true
+    },
+    "parsing_res_list": [
+        {
+            "block_label": "ocr",
+            "block_content": "AI Coding 内部技术报告 · 第 3 期\n\nPaddleOCR-VL 1.6 Output Verification\n\nThis page is test material for verifying the native output structure of PaddleOCR-VL 1.6. It mixes plain English paragraphs with a Chinese paragraph so the adapter mapping can be checked for both scripts. The layout detector should classify the heading above as a document title and everything here as body text.\n\n??????? PaddleOCR-VL 1.6????????????????\nCJK???????????\n\nprinted at 2026-09-21 · internal use only · page 1",
+            "block_bbox": [
+                0,
+                0,
+                1241,
+                1754
+            ],
+            "block_id": 0,
+            "block_order": 1,
+            "group_id": 0
+        }
+    ]
+}

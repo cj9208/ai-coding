@@ -23,18 +23,25 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "python-docx>=1.1",
+    "pydantic>=2.13.3",
 ]
 
 [project.optional-dependencies]
+# OCR 拆成三块、均可独立安装：`ocr` 是 Python 前端栈（paddleocr[doc-parser]），
+# 引擎按平台二选一。组合用法：
+#   CPU: uv sync --extra ocr --extra paddle-cpu
+#   GPU: uv sync --extra ocr --extra paddle-gpu
 ocr = [
     "paddleocr[doc-parser]>=3.7.0",
-    "paddlepaddle>=3.2.0; platform_machine == 'AMD64' or platform_machine == 'x86_64'",
     "pdf2image>=1.17.0",
 ]
-ocr-gpu = [
-    "paddleocr[doc-parser]>=3.7.0",
-    "paddlepaddle-gpu>=2.6.2; (platform_machine == 'AMD64' or platform_machine == 'x86_64') and sys_platform != 'darwin'",
-    "pdf2image>=1.17.0",
+paddle-cpu = [
+    "paddlepaddle>=3.2.0; platform_machine == 'AMD64' or platform_machine == 'x86_64'",
+]
+# PyPI 上 paddlepaddle-gpu 停在 2.6.2（与 paddlex 3.x 不兼容，跑 OCR 直接 AttributeError），
+# 因此 GPU 引擎改由 Paddle 官方源解析，见下方 [[tool.uv.index]] + [tool.uv.sources]。
+paddle-gpu = [
+    "paddlepaddle-gpu>=3.2.1; (platform_machine == 'AMD64' or platform_machine == 'x86_64') and sys_platform != 'darwin'",
 ]
 
 [project.scripts]
@@ -55,10 +62,20 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/coding", "src/modules", "src/pdf_summarizer", "src/utils", "src/ai_market_radar", "src/file_manager", "src/llm_client", "src/research_agent", "src/storage"]
+packages = ["src/coding", "src/modules", "src/pdf_summarizer", "src/utils", "src/ai_market_radar", "src/file_manager", "src/llm_client", "src/ocr_backend", "src/research_agent", "src/storage"]
 
 [tool.uv]
 package = true
+
+# GPU 引擎的官方源（PyPI 上没有可用的 3.x 轮子）。explicit = true 表示该源只对
+# [tool.uv.sources] 里指到它的包生效；换 CUDA 通道只改 URL（当前为本机 RTX 3070 Ti / cu126）。
+[[tool.uv.index]]
+name = "paddle"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+explicit = true
+
+[tool.uv.sources]
+paddlepaddle-gpu = { index = "paddle" }
 
 [tool.isort]
 profile = "black"

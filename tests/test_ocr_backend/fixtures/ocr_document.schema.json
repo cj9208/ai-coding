@@ -1,0 +1,250 @@
+{
+  "$defs": {
+    "BlockKind": {
+      "description": "Normalized block type — what a consumer branches on.\n\nA small closed set on purpose: backend labels are many and shifting\n(``content``, ``vision_footnote``, ...), kinds are few and stable. New\nbackend labels map onto an existing kind, or fall back to ``other``.",
+      "enum": [
+        "title",
+        "paragraph",
+        "table",
+        "formula",
+        "figure",
+        "caption",
+        "list_item",
+        "header",
+        "footer",
+        "page_number",
+        "footnote",
+        "other"
+      ],
+      "title": "BlockKind",
+      "type": "string"
+    },
+    "ContentFormat": {
+      "description": "How to interpret ``OcrBlock.content``.",
+      "enum": [
+        "text",
+        "markdown",
+        "html",
+        "latex"
+      ],
+      "title": "ContentFormat",
+      "type": "string"
+    },
+    "OcrBackendInfo": {
+      "description": "Which backend and model produced this — written for diffability:\ntwo runs of different versions can be compared document-to-document.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "library_version": {
+          "title": "Library Version",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "pipeline_version": {
+          "title": "Pipeline Version",
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": true,
+          "title": "Options",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "library_version",
+        "model",
+        "pipeline_version",
+        "options"
+      ],
+      "title": "OcrBackendInfo",
+      "type": "object"
+    },
+    "OcrBlock": {
+      "description": "One layout block, the atomic unit of the contract.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/BlockKind"
+        },
+        "raw_label": {
+          "title": "Raw Label",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "content_format": {
+          "$ref": "#/$defs/ContentFormat"
+        },
+        "bbox": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Bbox",
+          "type": "array"
+        },
+        "order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Order"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "raw_label",
+        "content",
+        "content_format",
+        "bbox"
+      ],
+      "title": "OcrBlock",
+      "type": "object"
+    },
+    "OcrPage": {
+      "description": "One page's blocks plus the raster geometry their bboxes live in.",
+      "properties": {
+        "page_index": {
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "width": {
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "title": "Height",
+          "type": "integer"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/OcrBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_index",
+        "width",
+        "height",
+        "blocks"
+      ],
+      "title": "OcrPage",
+      "type": "object"
+    },
+    "OcrSource": {
+      "description": "Where the document came from, with a hash for dedup/provenance.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "pdf",
+            "image"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "page_count": {
+          "title": "Page Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "sha256",
+        "page_count"
+      ],
+      "title": "OcrSource",
+      "type": "object"
+    }
+  },
+  "description": "The full output of one OCR run over one source file.",
+  "properties": {
+    "schema_version": {
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "coordinate_space": {
+      "const": "image_px_top_left",
+      "default": "image_px_top_left",
+      "title": "Coordinate Space",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/OcrSource"
+    },
+    "backend": {
+      "$ref": "#/$defs/OcrBackendInfo"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "pages": {
+      "items": {
+        "$ref": "#/$defs/OcrPage"
+      },
+      "title": "Pages",
+      "type": "array"
+    }
+  },
+  "required": [
+    "source",
+    "backend",
+    "created_at",
+    "pages"
+  ],
+  "title": "OcrDocument",
+  "type": "object"
+}

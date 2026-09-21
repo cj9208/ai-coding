@@ -1,0 +1,32 @@
+{
+    "input_path": "C:\\Users\\cjdyx\\Downloads\\Code_Repo\\ai-coding\\data\\ocr_backend\\verify\\materials\\blank_image_doc.pdf",
+    "page_index": 0,
+    "page_count": 2,
+    "width": 1191,
+    "height": 1684,
+    "model_settings": {
+        "use_doc_preprocessor": false,
+        "use_layout_detection": true,
+        "use_chart_recognition": false,
+        "use_seal_recognition": false,
+        "use_ocr_for_image_block": false,
+        "format_block_content": false,
+        "merge_layout_blocks": true,
+        "markdown_ignore_labels": [
+            "number",
+            "footnote",
+            "header",
+            "header_image",
+            "footer",
+            "footer_image",
+            "aside_text"
+        ],
+        "return_layout_polygon_points": true
+    },
+    "parsing_res_list": [],
+    "layout_det_res": {
+        "input_path": null,
+        "page_index": null,
+        "boxes": []
+    }
+}

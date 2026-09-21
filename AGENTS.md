@@ -18,9 +18,13 @@ the others, except where noted below.
 - Change dependencies with `uv add` / `uv remove`, then commit the refreshed
   `uv.lock`. On a clean machine, use `uv sync --locked` to install the recorded
   environment without re-resolving versions.
-- OCR is optional: `uv sync --extra ocr` installs the CPU profile, and
-  `uv sync --extra ocr-gpu` installs the GPU profile. Paddle requires x86_64
-  (reported as `AMD64` on Windows); the GPU profile is limited to Windows and Linux.
+- OCR is optional and split into independently installable extras: the
+  frontend stack `ocr`, plus an engine — `paddle-cpu` (PyPI) or `paddle-gpu`
+  (resolved from Paddle's official cu126 index declared in pyproject.toml;
+  PyPI's `paddlepaddle-gpu` is stuck at 2.6.2, incompatible with paddlex 3.x).
+  Use `uv sync --extra ocr --extra paddle-cpu` or
+  `uv sync --extra ocr --extra paddle-gpu`. Paddle requires x86_64
+  (reported as `AMD64` on Windows); GPU is limited to Windows and Linux.
 - The project is installed **editable with explicit top-level packages**
   (`[tool.hatch.build.targets.wheel] packages` in pyproject.toml). Imports are
   top-level (`from pdf_summarizer.config import ...`, never `src.pdf_summarizer`).
@@ -34,6 +38,9 @@ the others, except where noted below.
 - `test_summarize_live` is the only test hitting a real LLM API (skipped when
   `LLM_API_KEY` unset). A 401 there means the key in `.env` is stale — an
   environment issue, not a code regression.
+- `tests/test_ocr_backend/test_paddleocr_vl_live.py` runs the real OCR model
+  (skipped unless `OCR_LIVE=1` and the local snapshot `paddleocr-vl-1.6/` is
+  present); the rest of `test_ocr_backend` is model-free golden-fixture work.
 
 ## LLM access — one rule
 
@@ -52,6 +59,7 @@ are already there). Env convention lives only in
 |---|---|---|
 | `src/llm_client/` | shared LLM access point (see rule above) | — it *is* the LLM layer |
 | `src/storage/` | shared storage layer, one module per DB type in use (currently SQLite: `sqlite.py` engine/PRAGMA/session/ensure_columns/sha256_hex, `fts.py` fold_cjk/match_expr/FtsTable). Only generic access knowledge belongs here — table definitions and business stores stay in each project; see `docs/storage-usage-guide.md` | no |
+| `src/ocr_backend/` | shared OCR layer: one versioned `OcrDocument` contract (page → block, pixel bbox) + render projections (`page_text` / `document_markdown`); PaddleOCR-VL 1.6 is the first adapter (engine comes from the `paddle-cpu` / `paddle-gpu` extras — see `docs/ocr-backend-design.md` §7 for the GPU index gotcha). Consumers read the contract, never a backend's native output | no |
 | `src/pdf_summarizer/` | CLI: PDF → chunks → map-reduce summary | yes, via `llm_client` |
 | `src/ai_market_radar/` | scans OpenAI/Anthropic/Copilot **news sources** into SQLite, digest of new items. "OpenAI" here is a watched entity, not a dependency. Deterministic parsing on purpose — no LLM | no |
 | `src/file_manager/` | FastAPI file manager, metadata-first search (FTS5) | no |
