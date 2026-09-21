@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from .contract import EvidencePack
 from .engine import retrieve
 from .store import RagStore
+from .tracing import NO_TRACER, Tracer
 
 
 class GoldenCase(BaseModel):
@@ -49,60 +50,75 @@ def evaluate(
     cases: list[GoldenCase],
     k: int = 5,
     retrieve_fn: Any = None,
+    tracer: Tracer | None = None,
 ) -> dict[str, Any]:
-    retrieve_fn = retrieve_fn or (lambda q: retrieve(store, q, k))
+    tracer = tracer or NO_TRACER
+    retrieve_fn = retrieve_fn or (lambda q: retrieve(store, q, k, tracer=tracer))
     version = store.active_version()
     rows = []
-    for case in cases:
-        pack: EvidencePack = retrieve_fn(case.question)
-        if case.expects_abstention:
-            rows.append(
-                {
-                    "case_id": case.case_id,
-                    "kind": "abstention",
-                    "passed": pack.insufficient,
-                }
-            )
-            continue
-        expected = (
-            store.chunk_ids_matching(version, case.expected_substrings)
-            if version
-            else set()
-        )
-        if not expected:
-            rows.append(
-                {"case_id": case.case_id, "kind": "unresolved", "passed": False}
-            )
-            continue
-        returned = [c.chunk_id for c in pack.chunks]
-        hits = {r for r in returned if r in expected}
-        rows.append(
-            {
-                "case_id": case.case_id,
-                "kind": "retrieval",
-                "passed": bool(hits),
-                "recall": len(hits) / len(expected),
-                "precision": len(hits) / k,
-                "n_expected": len(expected),
-            }
-        )
+    with tracer.span("rag.eval", n_cases=len(cases), k=k) as esp:
+        for case in cases:
+            with tracer.span("rag.eval_case", case_id=case.case_id) as csp:
+                pack: EvidencePack = retrieve_fn(case.question)
+                if case.expects_abstention:
+                    rows.append(
+                        {
+                            "case_id": case.case_id,
+                            "kind": "abstention",
+                            "passed": pack.insufficient,
+                        }
+                    )
+                    csp.set(kind="abstention", passed=pack.insufficient)
+                    continue
+                expected = (
+                    store.chunk_ids_matching(version, case.expected_substrings)
+                    if version
+                    else set()
+                )
+                if not expected:
+                    rows.append(
+                        {"case_id": case.case_id, "kind": "unresolved", "passed": False}
+                    )
+                    csp.set(kind="unresolved", passed=False)
+                    continue
+                returned = [c.chunk_id for c in pack.chunks]
+                hits = {r for r in returned if r in expected}
+                rows.append(
+                    {
+                        "case_id": case.case_id,
+                        "kind": "retrieval",
+                        "passed": bool(hits),
+                        "recall": len(hits) / len(expected),
+                        "precision": len(hits) / k,
+                        "n_expected": len(expected),
+                    }
+                )
+                csp.set(
+                    kind="retrieval",
+                    passed=bool(hits),
+                    recall=round(len(hits) / len(expected), 3),
+                )
 
-    retrieval = [r for r in rows if r["kind"] == "retrieval"]
-    abstentions = [r for r in rows if r["kind"] == "abstention"]
-    unresolved = [r for r in rows if r["kind"] == "unresolved"]
-    summary: dict[str, Any] = {
-        "n_cases": len(rows),
-        "hit_rate": _mean(r["passed"] for r in retrieval),
-        "recall": _mean(r["recall"] for r in retrieval),
-        "precision": _mean(r["precision"] for r in retrieval),
-        "abstention_correct": (
-            f"{sum(1 for r in abstentions if r['passed'])}/{len(abstentions)}"
-            if abstentions
-            else None
-        ),
-        "unresolved_case_ids": [r["case_id"] for r in unresolved],
-        "per_case": rows,
-    }
+        retrieval = [r for r in rows if r["kind"] == "retrieval"]
+        abstentions = [r for r in rows if r["kind"] == "abstention"]
+        unresolved = [r for r in rows if r["kind"] == "unresolved"]
+        summary: dict[str, Any] = {
+            "n_cases": len(rows),
+            "hit_rate": _mean(r["passed"] for r in retrieval),
+            "recall": _mean(r["recall"] for r in retrieval),
+            "precision": _mean(r["precision"] for r in retrieval),
+            "abstention_correct": (
+                f"{sum(1 for r in abstentions if r['passed'])}/{len(abstentions)}"
+                if abstentions
+                else None
+            ),
+            "unresolved_case_ids": [r["case_id"] for r in unresolved],
+            "per_case": rows,
+        }
+        esp.set(
+            hit_rate=summary["hit_rate"],
+            n_unresolved=len(unresolved),
+        )
     return summary
 
 

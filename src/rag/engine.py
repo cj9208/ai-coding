@@ -15,6 +15,7 @@ from .fuse import rrf_fuse
 from .protocols import CandidatePath, ShapedQuery
 from .shape import LexicalShaper
 from .store import RagStore
+from .tracing import NO_TRACER, TracedPath, TracedShaper, Tracer
 
 
 def build_paths(store: RagStore, version: int) -> list[CandidatePath]:
@@ -34,23 +35,38 @@ def empty_pack(query: str, note: str) -> EvidencePack:
 
 
 def retrieve(
-    store: RagStore, question: str, k: int = 5, shaped: ShapedQuery | None = None
+    store: RagStore,
+    question: str,
+    k: int = 5,
+    shaped: ShapedQuery | None = None,
+    tracer: Tracer | None = None,
 ) -> EvidencePack:
-    version = store.active_version()
-    if version is None:
-        return empty_pack(question, "no published snapshot — run `rag build` first")
-    paths = build_paths(store, version)
-    if not paths:
-        return empty_pack(question, "active snapshot has no live representations")
-
-    shaped = shaped or LexicalShaper().shape(question)
-    outcomes = [(p.name, p.search(shaped, k * 2)) for p in paths]
-    fused = rrf_fuse([(name, out.candidates) for name, out in outcomes])
-    return assemble(
-        store.client,
-        version,
-        question,
-        fused,
-        k,
-        path_meta=[out.meta for _, out in outcomes],
-    )
+    tracer = tracer or NO_TRACER
+    with tracer.span(
+        "rag.retrieve", question=question[:120], **{"gen_ai.retrieval.top_k": k}
+    ) as rsp:
+        version = store.active_version()
+        if version is None:
+            pack = empty_pack(question, "no published snapshot — run `rag build` first")
+        elif not (paths := build_paths(store, version)):
+            pack = empty_pack(question, "active snapshot has no live representations")
+        else:
+            shaped = shaped or TracedShaper(LexicalShaper(), tracer).shape(question)
+            outcomes = [
+                (p.name, TracedPath(p, tracer).search(shaped, k * 2)) for p in paths
+            ]
+            fused = rrf_fuse([(name, out.candidates) for name, out in outcomes])
+            pack = assemble(
+                store.client,
+                version,
+                question,
+                fused,
+                k,
+                path_meta=[out.meta for _, out in outcomes],
+            )
+        rsp.set(
+            snapshot_version=version,
+            n_candidates=pack.strength.get("n_candidates", 0),
+            insufficient=pack.insufficient,
+        )
+    return pack

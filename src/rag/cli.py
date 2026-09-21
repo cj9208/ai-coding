@@ -4,6 +4,11 @@
     rag status
     rag query "年假超过几天需要审批？" [-k 5] [--retrieve-only]
     rag eval tests/golden/rag_sample.jsonl
+    rag traces [-n 10] [FILE]
+
+Any of build/query/eval accepts ``--trace``: the run is recorded as one
+JSONL span file under ``<data-dir>/traces/`` (see ``rag.tracing``), and
+``traces`` lists / renders those records.
 
 ``build`` is offline and deterministic (LLM only with ``--enrich``);
 ``query`` is the online pipeline; ``eval`` is the measurement harness —
@@ -26,6 +31,7 @@ from .engine import retrieve
 from .evaluation import evaluate, load_cases
 from .pipeline import build
 from .store import RagStore
+from .tracing import Tracer, load_trace, render_tree
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -65,11 +71,41 @@ def _parser() -> argparse.ArgumentParser:
     p_eval = sub.add_parser("eval", help="run a golden set against retrieval")
     p_eval.add_argument("golden", type=Path)
     p_eval.add_argument("-k", type=int, default=5)
+
+    p_traces = sub.add_parser(
+        "traces", help="list recorded runs; with FILE, render that trace as a tree"
+    )
+    p_traces.add_argument(
+        "file", nargs="?", help="trace JSONL (path or substring of a listed name)"
+    )
+    p_traces.add_argument("-n", type=int, default=10, help="how many to list")
+
+    for sp in (p_build, p_query, p_eval):
+        sp.add_argument(
+            "--trace",
+            action="store_true",
+            help="record this run's spans to <data-dir>/traces/ as JSONL",
+        )
     return parser
 
 
+def _tracer(args: argparse.Namespace) -> Tracer:
+    if not getattr(args, "trace", False):
+        return Tracer.disabled()
+    return Tracer(args.data_dir / "traces", run=args.command)
+
+
+def _report_trace(path: Path | None) -> None:
+    if path is not None:
+        print(f"\ntrace: {path}")
+
+
 def _cmd_build(args: argparse.Namespace) -> int:
-    report = build(args.inbox, args.data_dir, enrich=args.enrich)
+    tracer = _tracer(args)
+    try:
+        report = build(args.inbox, args.data_dir, enrich=args.enrich, tracer=tracer)
+    finally:
+        _report_trace(tracer.close())
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if not report["errors"] else 1
 
@@ -99,35 +135,75 @@ def _print_pack(pack) -> None:  # noqa: ANN001
 
 
 def _cmd_query(args: argparse.Namespace) -> int:
+    tracer = _tracer(args)
     store = RagStore(args.data_dir / "kb.db")
-    pack = retrieve(store, args.question, k=args.k)
-    _print_pack(pack)
-    if args.retrieve_only:
+    rc = 0
+    try:
+        with tracer.span("rag.query", question=args.question[:120]):
+            pack = retrieve(store, args.question, k=args.k, tracer=tracer)
+            _print_pack(pack)
+            if not args.retrieve_only:
+                with tracer.span(
+                    "gen_ai.completion", **{"gen_ai.operation.name": "chat"}
+                ) as csp:
+                    answer = asyncio.run(generate(pack, args.question))
+                    csp.set(outcome=answer.outcome.value, n_claims=len(answer.claims))
+                print()
+                print(f"outcome: {answer.outcome.value}")
+                if answer.text:
+                    print(answer.text)
+                for claim in answer.claims:
+                    refs = ", ".join(f"[{r}]" for r in claim.refs) or "(no citation)"
+                    print(f"  • {claim.text}  ← {refs}")
+                if answer.clarification:
+                    print(f"clarification: {answer.clarification}")
+                if answer.notes:
+                    print(f"notes: {answer.notes}")
+                rc = 0 if answer.outcome in (Outcome.answered, Outcome.partial) else 2
+    finally:
         store.dispose()
-        return 0
-    answer = asyncio.run(generate(pack, args.question))
-    print()
-    print(f"outcome: {answer.outcome.value}")
-    if answer.text:
-        print(answer.text)
-    for claim in answer.claims:
-        refs = ", ".join(f"[{r}]" for r in claim.refs) or "(no citation)"
-        print(f"  • {claim.text}  ← {refs}")
-    if answer.clarification:
-        print(f"clarification: {answer.clarification}")
-    if answer.notes:
-        print(f"notes: {answer.notes}")
-    store.dispose()
-    return 0 if answer.outcome in (Outcome.answered, Outcome.partial) else 2
+        _report_trace(tracer.close())
+    return rc
 
 
 def _cmd_eval(args: argparse.Namespace) -> int:
+    tracer = _tracer(args)
     store = RagStore(args.data_dir / "kb.db")
     cases = load_cases(args.golden)
-    summary = evaluate(store, cases, k=args.k)
+    try:
+        summary = evaluate(store, cases, k=args.k, tracer=tracer)
+    finally:
+        store.dispose()
+        _report_trace(tracer.close())
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    store.dispose()
     return 0 if not summary["unresolved_case_ids"] else 1
+
+
+def _cmd_traces(args: argparse.Namespace) -> int:
+    traces_dir = args.data_dir / "traces"
+    files = (
+        sorted(traces_dir.glob("*.jsonl"), reverse=True) if traces_dir.is_dir() else []
+    )
+    if args.file:
+        target = Path(args.file)
+        if not target.is_file():
+            matches = [f for f in files if args.file in f.name]
+            if not matches:
+                print(f"error: no trace matching {args.file!r}", file=sys.stderr)
+                return 1
+            target = matches[0]
+        print(render_tree(load_trace(target)))
+        return 0
+    if not files:
+        print("no traces yet — run build/query/eval with --trace")
+        return 0
+    for f in files[: args.n]:
+        spans = load_trace(f)
+        root = spans[0] if spans else None
+        total = root.duration_ms if root else "?"
+        bad = any(s.status != "ok" for s in spans)
+        print(f"{f.name}  {len(spans)} span(s)  {total} ms{'  [error]' if bad else ''}")
+    return 0
 
 
 _COMMANDS = {
@@ -135,6 +211,7 @@ _COMMANDS = {
     "status": _cmd_status,
     "query": _cmd_query,
     "eval": _cmd_eval,
+    "traces": _cmd_traces,
 }
 
 

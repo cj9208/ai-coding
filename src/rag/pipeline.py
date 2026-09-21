@@ -18,6 +18,7 @@ from .contract import CanonicalDoc, PublishDecision
 from .enrich import LlmEnricher
 from .ingest import OcrBundleAcquirer
 from .store import RagStore
+from .tracing import NO_TRACER, TracedAcquirer, TracedChunker, TracedEnricher, Tracer
 
 INDEXABLE = frozenset({PublishDecision.pass_, PublishDecision.pass_with_warning})
 REPRESENTATIONS = {"fts": "ready", "vector": "absent@bge-m3"}
@@ -39,10 +40,12 @@ def build(
     *,
     enrich: bool = False,
     store: RagStore | None = None,
+    tracer: Tracer | None = None,
 ) -> dict[str, Any]:
+    tracer = tracer or NO_TRACER
     store = store or RagStore(data_dir / "kb.db")
-    acquirer = OcrBundleAcquirer()
-    chunker = StructureAwareChunker()
+    acquirer = TracedAcquirer(OcrBundleAcquirer(), tracer)
+    chunker = TracedChunker(StructureAwareChunker(), tracer)
     report: dict[str, Any] = {
         "inbox": str(inbox),
         "bundles": 0,
@@ -53,28 +56,30 @@ def build(
     chunks = []
     indexed_docs: list[CanonicalDoc] = []
 
-    for bundle in sorted(inbox.glob("*.ocr.json")):
-        report["bundles"] += 1
-        try:
-            doc = acquirer.fetch(bundle)
-        except Exception as exc:  # a broken bundle must not kill the build
-            report["errors"].append(f"{bundle.name}: {exc}")
-            continue
-        store.upsert_document(doc)
-        decision = doc.trust.publish_decision.value
-        report["decisions"][decision] = report["decisions"].get(decision, 0) + 1
-        if doc.trust.publish_decision not in INDEXABLE:
-            continue
-        chunks.extend(chunker.split(doc))
-        indexed_docs.append(doc)
+    with tracer.span("rag.build", inbox=str(inbox), enrich=enrich) as rsp:
+        for bundle in sorted(inbox.glob("*.ocr.json")):
+            report["bundles"] += 1
+            try:
+                doc = acquirer.fetch(bundle)
+            except Exception as exc:  # a broken bundle must not kill the build
+                report["errors"].append(f"{bundle.name}: {exc}")
+                continue
+            store.upsert_document(doc)
+            decision = doc.trust.publish_decision.value
+            report["decisions"][decision] = report["decisions"].get(decision, 0) + 1
+            if doc.trust.publish_decision not in INDEXABLE:
+                continue
+            chunks.extend(chunker.split(doc))
+            indexed_docs.append(doc)
 
-    if enrich and chunks:
-        asyncio.run(LlmEnricher().enrich(chunks))
+        if enrich and chunks:
+            asyncio.run(TracedEnricher(LlmEnricher(), tracer).enrich(chunks))
 
-    version = store.next_version()
-    store.stage_chunks(version, chunks)
-    publish = store.publish(version, REPRESENTATIONS)
-    _write_corpus_projection(data_dir / "corpus", indexed_docs)
+        version = store.next_version()
+        store.stage_chunks(version, chunks)
+        publish = store.publish(version, REPRESENTATIONS)
+        _write_corpus_projection(data_dir / "corpus", indexed_docs)
+        rsp.set(corpus_version=version, n_chunks=len(chunks))
     report.update(publish)
     report["chunked_docs"] = len(indexed_docs)
     return report
