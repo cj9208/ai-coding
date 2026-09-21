@@ -15,7 +15,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ocr_backend.contract import OcrDocument
 from storage import sha256_hex
@@ -140,6 +140,13 @@ class Candidate(BaseModel):
     chunk_id: str
     scores: dict[str, float] = Field(default_factory=dict)
     ranks: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("scores", "ranks")
+    @classmethod
+    def _non_empty_keys(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if any(not k for k in v):
+            raise ValueError("dict keys must be non-empty strings")
+        return v
 
 
 class EvidencePack(BaseModel):
