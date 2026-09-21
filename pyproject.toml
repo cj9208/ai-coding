@@ -54,6 +54,11 @@ ocr-review = "ocr_review.cli:main"
 
 [dependency-groups]
 dev = [
+    "bandit>=1.9.4",
+    "black>=26.3.1",
+    "flake8>=7.3.0",
+    "isort>=8.0.1",
+    "mypy>=1.19",
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.26.0",
@@ -81,6 +86,29 @@ paddlepaddle-gpu = { index = "paddle" }
 
 [tool.isort]
 profile = "black"
+
+[tool.black]
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+
+# Third-party libs without (usable) type information: paddleocr only exists
+# when an OCR extra is installed, the rest ship no py.typed marker. Checking
+# our code against a full env and against the CI hook must give the same list.
+[[tool.mypy.overrides]]
+module = [
+    "paddleocr.*",
+    "paddlex.*",
+    "fitz",
+    "pandas.*",
+    "openpyxl.*",
+    "markdownify.*",
+    "feedparser.*",
+    "ruamel.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

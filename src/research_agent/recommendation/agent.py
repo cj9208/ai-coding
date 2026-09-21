@@ -11,6 +11,7 @@ import logging
 from ..contracts.models import (
     AdversarialDraft,
     Assumption,
+    ConfidenceLabel,
     EvidencePack,
     Finding,
     PhaseName,
@@ -361,10 +362,10 @@ _STARS = {"high": 2, "medium": 1, "low": 0}
 
 def _pick_confidence(
     ranked: scorer.Ranked, candidate: str, independent_sources: int, pack: EvidencePack
-) -> str:
+) -> ConfidenceLabel:
     """04 §5 aggregate: coverage + source independence, capped by stop_reason."""
     cov = ranked.coverage.get(candidate, 0)
-    level = (
+    level: ConfidenceLabel = (
         "high"
         if cov >= 0.6 and independent_sources >= 2
         else "medium" if cov > 0 else "low"
@@ -374,7 +375,9 @@ def _pick_confidence(
     return level
 
 
-def _overall(picks: list[Pick], pack: EvidencePack, answers: UserAnswers | None) -> str:
+def _overall(
+    picks: list[Pick], pack: EvidencePack, answers: UserAnswers | None
+) -> ConfidenceLabel:
     scores = [_STARS[p.confidence] for p in picks] or [0]
     level = max(0, min(scores[0], scores[1] if len(scores) > 1 else scores[0]))
     if pack.stop_reason or (
@@ -385,7 +388,8 @@ def _overall(picks: list[Pick], pack: EvidencePack, answers: UserAnswers | None)
         )
     ):
         level = min(level, 1)  # cap at medium
-    return {2: "high", 1: "medium", 0: "low"}[level]
+    labels: dict[int, ConfidenceLabel] = {2: "high", 1: "medium", 0: "low"}
+    return labels[level]
 
 
 def _rejecteds(ranked: scorer.Ranked) -> list[Rejected]:

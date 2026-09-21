@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Literal, Sequence
 
 from pydantic import BaseModel
 from sqlalchemy import Integer, cast, func, select
@@ -72,7 +72,7 @@ class SessionStore:
         new_phase: str,
         artifacts: Sequence[BaseModel] = (),
         bumps: dict[str, int] | None = None,
-        stop_reason: str | None | bool = False,
+        stop_reason: str | None | Literal[False] = False,
     ) -> None:
         """`stop_reason` sentinel: False = leave unchanged, None = clear."""
         with self.client.session() as db:
@@ -360,7 +360,6 @@ class SessionStore:
         elif column.table.name == "captures":
             stmt = stmt.where(CaptureRow.session_id == session_id)
         n = db.scalar(stmt)
-        try:
-            return f"{prefix}{int(n) + 1}"
-        except (TypeError, ValueError):
+        if n is None:
             return f"{prefix}1"
+        return f"{prefix}{int(n) + 1}"

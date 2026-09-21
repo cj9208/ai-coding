@@ -45,7 +45,7 @@ def test_wal_and_foreign_keys_applied_per_engine(client: SqliteClient):
         mode = db.connection().exec_driver_sql("PRAGMA journal_mode").scalar()
         fk = db.connection().exec_driver_sql("PRAGMA foreign_keys").scalar()
     assert str(mode).lower() == "wal"
-    assert int(fk) == 1
+    assert fk is not None and int(fk) == 1
 
 
 def test_pragma_listener_does_not_leak_across_engines(tmp_path: Path):

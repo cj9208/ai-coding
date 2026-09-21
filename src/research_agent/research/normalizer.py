@@ -75,7 +75,7 @@ def claim_tokens(claim: str) -> frozenset[str]:
 class SupportClusterer:
     """Greedy near-dup clustering over claim token sets (session-scoped)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._clusters: dict[str, frozenset[str]] = {}
         self._seq = 0
 

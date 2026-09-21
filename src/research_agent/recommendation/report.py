@@ -130,10 +130,10 @@ def render_markdown(
 
     if pack.source_failures:
         lines.append("## 采集失败记录")
-        for f in pack.source_failures[:10]:
+        for fail in pack.source_failures[:10]:
             lines.append(
-                f"- {f.query_id or '-'} / {f.adapter} / "
-                f"{(f.url or '-')[:80]} — {f.error[:120]}"
+                f"- {fail.query_id or '-'} / {fail.adapter} / "
+                f"{(fail.url or '-')[:80]} — {fail.error[:120]}"
             )
         lines.append("")
 

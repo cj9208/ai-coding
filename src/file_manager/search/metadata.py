@@ -198,12 +198,12 @@ class MetadataSearchBackend(SearchBackend):
                 for rid in hit:
                     found[rid].append(label)
             if tokens:
-                stmt = (
+                token_stmt = (
                     select(FileMeta.id)
                     .where(FileMeta.id.in_(ids))
                     .where(or_(*[_ilike(t, column) for t in tokens]))
                 )
-                for rid in set(db.scalars(stmt).all()) - hit:
+                for rid in set(db.scalars(token_stmt).all()) - hit:
                     found[rid].append(f"{label}·模糊")
         return found
 

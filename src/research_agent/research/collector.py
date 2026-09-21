@@ -12,8 +12,9 @@ URL never hard-fails the session (02 §3).
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..contracts.models import (
     ExtractionResult,
@@ -221,7 +222,7 @@ class Collector:
         return self.adapters.get("web_search") or next(iter(self.adapters.values()))
 
     @staticmethod
-    async def _with_retries(coro_factory):
+    async def _with_retries(coro_factory: Callable[[], Awaitable[Any]]) -> Any:
         last: Exception = AdapterError("never attempted")
         for _ in range(1 + RETRIES):
             try:

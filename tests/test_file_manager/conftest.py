@@ -58,7 +58,7 @@ def upload(
     r = client.post(
         "/api/files",
         files={"file": (filename, io.BytesIO(content), "application/octet-stream")},
-        data={"project_id": project_id, **fields},
+        data={"project_id": str(project_id), **fields},
     )
     assert r.status_code == 201, r.text
     return r.json()

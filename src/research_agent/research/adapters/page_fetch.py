@@ -48,7 +48,7 @@ class PageFetchAdapter:
         content_type = resp.headers.get("content-type", "")
         if "html" in content_type or html.lstrip().startswith(("<", "<!")):
             html = _DROP_TAGS.sub(" ", html)
-            text = markdownify(html, heading="#", strip=["img", "button"])
+            text = markdownify(html, heading_style="ATX", strip=["img", "button"])
         else:
             text = html
         text = re.sub(r"\n{3,}", "\n\n", text).strip()

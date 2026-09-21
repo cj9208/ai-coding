@@ -33,14 +33,10 @@ of truth for completed work.
 - [ ] `ocr-backend container parse` does not forward `--raw-dir`, so seeing
       Paddle's native per-page JSON still requires the raw Compose command
       (docs §1.1 lists the workaround). Add the flag, or drop the claim.
-- [ ] `shell_scipts/verify_paddle_vl_16.py` is still untracked. It produced the
+- [ ] `scripts/verify_paddle_vl_16.py` is still untracked. It produced the
       engine facts the adapter documents, so it is either worth committing or
       worth deleting — keeping it untracked means the evidence trail for
       `docs/ocr-backend-design.md` §5.3 exists only on this machine.
-- [ ] mypy reports pre-existing errors on `paddleocr` (optional extra, not
-      installed by default) and `ruamel` (missing stubs). Harmless locally, but
-      they will surface in the pre-commit hook; decide between narrowing mypy's
-      follow-imports and adding ignore-stub entries.
 
 ## Next, if the demand is real
 

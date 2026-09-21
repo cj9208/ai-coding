@@ -1,0 +1,14 @@
+# Single source for flake8 settings — the pre-commit hook no longer passes
+# line-length args, so editors and CI read the same values from here.
+[flake8]
+max-line-length = 100
+# E203 conflicts with black's slice formatting
+extend-ignore = E203
+exclude =
+    .venv,
+    __pycache__,
+    build,
+    dist,
+    v,
+    data,
+    opencode

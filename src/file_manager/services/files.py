@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import func, select, text
+from sqlalchemy import UnaryExpression, func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from storage import sha256_hex
@@ -73,6 +73,7 @@ def order_by_for(sort: str) -> list:
     """把 sort 参数（形如 field_asc / field_desc）换成 ORDER BY 子句，未知值回退到新→旧。"""
     field, _, direction = sort.rpartition("_")
     column = _SORT_COLUMNS.get(field)
+    primary: UnaryExpression
     if column is None:
         primary = FileMeta.created_at.desc()
     else:

@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from sqlalchemy import Index, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from ..contracts.models import FindingKind
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -73,7 +75,7 @@ class FindingRow(Base):
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
     capture_id: Mapped[str] = mapped_column(String, index=True)
     claim: Mapped[str] = mapped_column(Text)
-    kind: Mapped[str] = mapped_column(String, default="fact")
+    kind: Mapped[FindingKind] = mapped_column(String, default="fact")
     decision_criteria: Mapped[str] = mapped_column(Text, default="")  # JSON list
     touches_candidates: Mapped[str] = mapped_column(Text, default="")  # JSON list
     quote: Mapped[str] = mapped_column(Text, default="")
