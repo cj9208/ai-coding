@@ -12,7 +12,8 @@ JSONL span file under ``<data-dir>/traces/`` (see ``rag.tracing``), and
 
 ``build`` is offline and deterministic (LLM only with ``--enrich``);
 ``query`` is the online pipeline; ``eval`` is the measurement harness —
-see ``docs/rag-subsystem-design.md`` for what each stage guarantees.
+see ``docs/rag/02-implementation.md`` for what each stage guarantees and
+``docs/rag/03-usage.md`` for the full CLI reference.
 """
 
 from __future__ import annotations

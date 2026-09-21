@@ -1,8 +1,11 @@
-# RAG Subsystem — Design
+# RAG Subsystem — Design Rationale
 
 Status: **M1 implemented** (lexical-only vertical slice). The corpus is not
 chosen yet, so this design's job is to make the *pipeline* a fact and every
 *retrieval technology* a plug-in — see "Why plugins with one implementation".
+This document answers *why the design is shaped this way*; for what actually
+shipped (module map, constants, deviations from this text) read
+`02-implementation.md`, for how to run it `03-usage.md`.
 
 Reference: the layer model comes from the blog note set
 `AI_study/rag-orchestration-architecture` (CH03_01–04). This document records
@@ -180,12 +183,6 @@ shaping; wrong context size → ChunkStrategy).
 
 ## Run it
 
-```bash
-uv run rag build --inbox data/ocr_backend/out   # offline pipeline, prints snapshot report
-uv run rag query "问题" -k 5                     # online: retrieval + grounded answer
-uv run rag query "问题" --retrieve-only          # evidence pack only (no LLM)
-uv run rag eval tests/golden/rag_sample.jsonl   # metrics on the golden set
-```
-
-Tests: `uv run pytest tests/test_rag` — model-free (LLM paths are
+Moved to `03-usage.md` (the full CLI reference). Tests:
+`uv run pytest tests/test_rag` — model-free (LLM paths are
 monkeypatched); the LLM is only reached by explicit `--enrich` / answering.

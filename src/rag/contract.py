@@ -4,7 +4,7 @@ Why contracts and not stages are the frozen part: the corpus is not chosen
 yet, so every *technology* behind a stage (parsing source, lexical engine,
 vector store, generator) is a swappable plug-in — but the objects crossing
 the seams must be stable, or adding a plug-in means a rewrite. See
-``docs/rag-subsystem-design.md``.
+``docs/rag/01-design-rationale.md``.
 
 Design rules (same as ``ocr_backend.contract``): JSON-native pydantic,
 unknown fields ignored on load, data settles into plain types.
