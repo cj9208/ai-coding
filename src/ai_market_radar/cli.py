@@ -13,10 +13,11 @@ from ai_market_radar.normalize import to_items
 from ai_market_radar.registry import load_sources
 from ai_market_radar.store import KnowledgeBase
 
-# repo-root anchor, same convention as research_agent / file_manager:
+# repo-root anchor per AGENTS.md, defined once in utils.paths:
 # the KB lives under data/ai_market_radar no matter where the CLI is launched
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATA_DIR = REPO_ROOT / "data" / "ai_market_radar"
+from utils import paths
+
+DEFAULT_DATA_DIR = paths.data_dir("ai_market_radar")
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

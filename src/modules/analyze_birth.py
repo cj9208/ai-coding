@@ -1,12 +1,11 @@
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
-# repo-root anchor per AGENTS.md: outputs always land in data/analyze_birth/
-# no matter where the script is launched from
-REPO_ROOT = Path(__file__).resolve().parents[2]
-OUTPUT_DIR = REPO_ROOT / "data" / "analyze_birth"
+# repo-root anchor per AGENTS.md, defined once in utils.paths: outputs always
+# land in data/analyze_birth/ no matter where the script is launched from
+from utils import paths
+
+OUTPUT_DIR = paths.data_dir("analyze_birth")
 
 
 def simulate_future_births():

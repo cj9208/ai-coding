@@ -6,10 +6,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = Path(
-    os.getenv("RESEARCH_AGENT_DATA_DIR", REPO_ROOT / "data" / "research_agent")
-)
+# repo-root anchoring per AGENTS.md; single definition in utils.paths
+from utils import paths
+
+DATA_DIR = Path(os.getenv("RESEARCH_AGENT_DATA_DIR", paths.data_dir("research_agent")))
 DB_PATH = DATA_DIR / "agent.db"
 REPORTS_DIR = DATA_DIR / "reports"
 

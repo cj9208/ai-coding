@@ -4,9 +4,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-# repo-root anchor, same convention as research_agent.config: launching from
-# another cwd must not silently create a second database elsewhere
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# repo-root anchoring per AGENTS.md; single definition in utils.paths so a
+# launch from any cwd cannot create a second database elsewhere
+from utils import paths
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    data_dir = Path(os.environ.get("FM_DATA_DIR", REPO_ROOT / "data" / "file_manager"))
+    data_dir = Path(os.environ.get("FM_DATA_DIR", paths.data_dir("file_manager")))
     db_url = os.environ.get(
         "FM_DATABASE_URL", f"sqlite:///{data_dir / 'file_manager.db'}"
     )
