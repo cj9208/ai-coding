@@ -1,10 +1,11 @@
 """``rag`` CLI — the one entry point for the knowledge pipeline.
 
-    rag build --inbox data/ocr_backend/out [--enrich]   # ingest + publish
-    rag ingest [--inbox DIR] [--limit N] [--enrich]     # stage new/changed docs
-    rag publish                                          # diff transaction
-    rag retract <doc_id>                                 # mark for removal
-    rag gc [--keep N]                                    # prune old snapshots
+    rag build --inbox data/ocr_backend/out          # ingest + publish
+    rag ingest [--inbox DIR] [--limit N]            # stage new/changed docs
+    rag publish                                     # diff transaction
+    rag enrich [--limit N] [--prompt-ver V]         # LLM-annotate unenriched chunks
+    rag retract <doc_id>                            # mark for removal
+    rag gc [--keep N]                               # prune old snapshots
     rag status
     rag query "年假超过几天需要审批？" [-k 5] [--retrieve-only]
     rag eval tests/golden/rag_sample.jsonl
@@ -14,7 +15,8 @@ Any of build/ingest/query/eval accepts ``--trace``: the run is recorded as
 one JSONL span file under ``<data-dir>/traces/`` (see ``rag.tracing``), and
 ``traces`` lists / renders those records.
 
-``build`` is offline and deterministic (LLM only with ``--enrich``);
+``build`` is offline and deterministic; ``enrich`` is the only LLM touch
+in the offline pipeline and runs as an independent background step;
 ``query`` is the online pipeline; ``eval`` is the measurement harness —
 see ``docs/rag/02-implementation.md`` for what each stage guarantees and
 ``docs/rag/03-usage.md`` for the full CLI reference.
@@ -56,11 +58,6 @@ def _parser() -> argparse.ArgumentParser:
         default=default_data_dir("ocr_backend") / "out",
         help="directory of *.ocr.json bundles from `ocr-backend parse`",
     )
-    p_build.add_argument(
-        "--enrich",
-        action="store_true",
-        help="LLM-annotate chunks (titles/keywords/summaries) before indexing",
-    )
 
     p_ingest = sub.add_parser("ingest", help="stage new/changed docs from inbox")
     p_ingest.add_argument(
@@ -70,11 +67,6 @@ def _parser() -> argparse.ArgumentParser:
         help="directory of *.ocr.json bundles from `ocr-backend parse`",
     )
     p_ingest.add_argument(
-        "--enrich",
-        action="store_true",
-        help="LLM-annotate chunks (titles/keywords/summaries) before indexing",
-    )
-    p_ingest.add_argument(
         "--limit",
         type=int,
         default=0,
@@ -82,6 +74,21 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("publish", help="run the diff transaction (staged -> active)")
+
+    p_enrich = sub.add_parser(
+        "enrich", help="LLM-annotate unenriched chunks (independent background step)"
+    )
+    p_enrich.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="stop after N chunks (0 = no limit)",
+    )
+    p_enrich.add_argument(
+        "--prompt-ver",
+        default=None,
+        help="prompt version tag (default: versions.PROMPT_VER)",
+    )
 
     p_retract = sub.add_parser("retract", help="mark a doc for removal at next publish")
     p_retract.add_argument("doc_id", help="document id to retract")
@@ -140,7 +147,7 @@ def _report_trace(path: Path | None) -> None:
 def _cmd_build(args: argparse.Namespace) -> int:
     tracer = _tracer(args)
     try:
-        report = build(args.inbox, args.data_dir, enrich=args.enrich, tracer=tracer)
+        report = build(args.inbox, args.data_dir, tracer=tracer)
     finally:
         _report_trace(tracer.close())
     print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -153,7 +160,6 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         report = ingest(
             args.inbox,
             args.data_dir,
-            enrich=args.enrich,
             limit=args.limit,
             tracer=tracer,
         )
@@ -167,6 +173,20 @@ def _cmd_publish(args: argparse.Namespace) -> int:
     report = publish(args.data_dir)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
+
+
+def _cmd_enrich(args: argparse.Namespace) -> int:
+    from .enrich import enrich_corpus
+    from .versions import PROMPT_VER
+
+    prompt_ver = args.prompt_ver or PROMPT_VER
+    report = enrich_corpus(
+        args.data_dir,
+        limit=args.limit,
+        prompt_ver=prompt_ver,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 1 if report["errors"] else 0
 
 
 def _cmd_retract(args: argparse.Namespace) -> int:
@@ -285,6 +305,7 @@ _COMMANDS = {
     "build": _cmd_build,
     "ingest": _cmd_ingest,
     "publish": _cmd_publish,
+    "enrich": _cmd_enrich,
     "retract": _cmd_retract,
     "gc": _cmd_gc,
     "status": _cmd_status,

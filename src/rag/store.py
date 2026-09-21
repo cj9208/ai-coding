@@ -563,5 +563,95 @@ class RagStore:
                 "snapshots": [list(r) for r in snaps],
             }
 
+    # -- inferred (enrich side projection) ------------------------------------
+
+    def write_inferred(
+        self,
+        chunk_id: str,
+        prompt_ver: str,
+        *,
+        title: str,
+        keywords: str,
+        summary: str,
+    ) -> None:
+        """Persist one enrich result. Idempotent on (chunk_id, prompt_ver)."""
+        from datetime import datetime, timezone
+
+        with self.client.session() as db:
+            db.execute(
+                text("""INSERT INTO inferred
+                       (chunk_id, prompt_ver, title, keywords, summary, created_at)
+                       VALUES (:cid, :pv, :t, :k, :s, :at)
+                       ON CONFLICT(chunk_id, prompt_ver) DO UPDATE SET
+                           title=excluded.title,
+                           keywords=excluded.keywords,
+                           summary=excluded.summary,
+                           created_at=excluded.created_at"""),
+                {
+                    "cid": chunk_id,
+                    "pv": prompt_ver,
+                    "t": title,
+                    "k": keywords,
+                    "s": summary,
+                    "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                },
+            )
+            db.commit()
+
+    def unenriched_child_chunk_ids(
+        self, prompt_ver: str, *, limit: int = 0
+    ) -> list[tuple[str, str]]:
+        """Child chunks in the active snapshot lacking an inferred row for
+        *prompt_ver*. Returns ``(chunk_id, doc_id)`` pairs."""
+        with self.client.session() as db:
+            active = self._active_in(db)
+            if active is None:
+                return []
+            sql = (
+                "SELECT c.chunk_id, c.doc_id FROM chunks c "
+                "JOIN snapshot_docs sd ON sd.doc_id = c.doc_id "
+                "  AND sd.pipeline_fp = c.pipeline_fp "
+                "WHERE sd.corpus_version = :v AND c.is_parent = 0 "
+                "  AND NOT EXISTS ("
+                "    SELECT 1 FROM inferred i"
+                "    WHERE i.chunk_id = c.chunk_id AND i.prompt_ver = :pv"
+                "  )"
+            )
+            rows = db.execute(text(sql), {"v": active, "pv": prompt_ver}).fetchall()
+            if limit > 0:
+                rows = rows[:limit]
+            return [(r[0], r[1]) for r in rows]
+
+    def refresh_fts_for_docs(self, doc_ids: list[str], fp: str) -> int:
+        """Re-upsert FTS rows for the given docs (uses latest inferred).
+        Returns the number of FTS rows touched."""
+        with self.client.session() as db:
+            n = 0
+            for doc_id in doc_ids:
+                chunk_rows = db.execute(
+                    text("""SELECT rowid, chunk_id, section_path, text
+                           FROM chunks
+                           WHERE doc_id = :doc_id AND pipeline_fp = :fp
+                           AND is_parent = 0"""),
+                    {"doc_id": doc_id, "fp": fp},
+                ).fetchall()
+                for cr in chunk_rows:
+                    inf = self._load_inferred(db, cr.chunk_id)
+                    self.fts.upsert(
+                        db,
+                        cr.rowid,
+                        {
+                            "title": inf.get("title", "")
+                            or cr.section_path.split(" > ")[-1],
+                            "body": cr.text,
+                            "section_path": cr.section_path,
+                            "keywords": inf.get("keywords", ""),
+                            "summary": inf.get("summary", ""),
+                        },
+                    )
+                    n += 1
+            db.commit()
+        return n
+
     def dispose(self) -> None:
         self.client.dispose()

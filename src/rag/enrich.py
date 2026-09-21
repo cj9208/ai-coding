@@ -1,19 +1,28 @@
-"""LLM enrichment: synthetic retrieval aids, kept in ``chunk.inferred``.
+"""LLM enrichment: synthetic retrieval aids, persisted as a side projection.
 
-Opt-in at build time (``--enrich``) because it is the only LLM touch in the
-offline pipeline; without it the pipeline stays fully deterministic.
-Writes never merge into source text — the inferred dict is a separate
-column, indexed separately, and the summary/keywords exist only to make
-weak local chunks retrievable (CH03_02 synthetic retrieval aids).
+Enrich is an independent background step (``rag enrich``), not part of the
+build pipeline. It scans live child chunks that lack an ``inferred`` row
+for the current prompt version, calls the LLM, and writes the result
+straight to the ``inferred`` table — the in-memory ``chunk.inferred`` dict
+is never used. Each chunk is committed individually so a crash loses at
+most one LLM call, and a re-run picks up where it left off.
+
+Without ``rag enrich`` the pipeline stays fully deterministic; chunks are
+searchable via the FTS fallback (section_path title, empty keywords /
+summary). See ``docs/rag/04-scaling.md`` §5 and ``docs/rag/05-incremental-design.md``.
 """
 
 from __future__ import annotations
+
+import asyncio
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from llm_client import LLMClient, get_client
 
-from .contract import Chunk
+from .store import RagStore
+from .versions import PROMPT_VER, pipeline_fp
 
 _MAX_INPUT_CHARS = 2000
 
@@ -31,18 +40,36 @@ class _Insight(BaseModel):
 
 
 class LlmEnricher:
-    """Implements :class:`rag.protocols.EnrichProvider`."""
+    """Implements :class:`rag.protocols.EnrichProvider`.
+
+    When a *store* is provided, each chunk's result is persisted to the
+    ``inferred`` table immediately (checkpoint-per-chunk). Without a store
+    the result is written to ``chunk.inferred`` in memory only — kept for
+    unit tests that exercise the LLM call in isolation.
+    """
 
     name = "llm"
 
-    def __init__(self, client: LLMClient | None = None, max_chunks: int = 500):
+    def __init__(
+        self,
+        client: LLMClient | None = None,
+        max_chunks: int = 500,
+        store: RagStore | None = None,
+        prompt_ver: str = PROMPT_VER,
+    ):
         self.client = client
         self.max_chunks = max_chunks
+        self.store = store
+        self.prompt_ver = prompt_ver
 
-    async def enrich(self, chunks: list[Chunk]) -> None:
+    async def enrich(self, chunks: list[Any]) -> None:
         client = self.client or get_client()
         for chunk in chunks[: self.max_chunks]:
-            if chunk.is_parent or chunk.inferred:
+            if chunk.is_parent:
+                continue
+            if self.store is not None and _already_enriched(
+                self.store, chunk.chunk_id, self.prompt_ver
+            ):
                 continue
             raw = await client.chat_json(
                 f"Chunk text:\n{chunk.text[:_MAX_INPUT_CHARS]}",
@@ -51,8 +78,121 @@ class LlmEnricher:
                 temperature=0.0,
             )
             insight = raw if isinstance(raw, _Insight) else _Insight.model_validate(raw)
-            chunk.inferred = {
-                "title": insight.title,
-                "keywords": insight.keywords,
-                "summary": insight.summary,
-            }
+            if self.store is not None:
+                self.store.write_inferred(
+                    chunk.chunk_id,
+                    self.prompt_ver,
+                    title=insight.title,
+                    keywords=" ".join(insight.keywords),
+                    summary=insight.summary,
+                )
+            else:
+                chunk.inferred = {
+                    "title": insight.title,
+                    "keywords": insight.keywords,
+                    "summary": insight.summary,
+                }
+
+
+def _already_enriched(store: RagStore, chunk_id: str, prompt_ver: str) -> bool:
+    from sqlalchemy import text
+
+    with store.client.session() as db:
+        row = db.execute(
+            text(
+                "SELECT 1 FROM inferred" " WHERE chunk_id = :cid AND prompt_ver = :pv"
+            ),
+            {"cid": chunk_id, "pv": prompt_ver},
+        ).first()
+    return row is not None
+
+
+def enrich_corpus(
+    data_dir: Any,
+    *,
+    limit: int = 0,
+    store: RagStore | None = None,
+    prompt_ver: str = PROMPT_VER,
+) -> dict[str, Any]:
+    """Scan unenriched child chunks, LLM-annotate them, persist results.
+
+    Reads chunk text from the DB, calls the LLM, writes each result to the
+    ``inferred`` table, then refreshes the affected FTS rows. Returns a
+    summary report.
+    """
+    from pathlib import Path
+
+    from .contract import Chunk
+
+    store = store or RagStore(Path(data_dir) / "kb.db")
+    fp = pipeline_fp()
+
+    pending = store.unenriched_child_chunk_ids(prompt_ver, limit=limit)
+    if not pending:
+        return {
+            "prompt_ver": prompt_ver,
+            "pending": 0,
+            "enriched": 0,
+            "errors": [],
+            "docs_refreshed": 0,
+        }
+
+    chunk_ids = [cid for cid, _ in pending]
+    doc_ids = sorted({did for _, did in pending})
+
+    from sqlalchemy import text
+
+    chunks_by_id: dict[str, Chunk] = {}
+    with store.client.session() as db:
+        for cid in chunk_ids:
+            row = db.execute(
+                text(
+                    "SELECT chunk_id, doc_id, chunk_type, is_parent,"
+                    " parent_chunk_id, section_path, page_start, page_end,"
+                    " block_keys, text, structured_payload, trust_level,"
+                    " content_hash, pipeline_fp"
+                    " FROM chunks WHERE chunk_id = :cid"
+                ),
+                {"cid": cid},
+            ).first()
+            if row:
+                import json
+
+                chunks_by_id[row[0]] = Chunk(
+                    chunk_id=row[0],
+                    doc_id=row[1],
+                    chunk_type=row[2],
+                    is_parent=bool(row[3]),
+                    parent_chunk_id=row[4],
+                    section_path=row[5],
+                    text=row[9],
+                    page_span=(row[6], row[7]),
+                    block_keys=json.loads(row[8]),
+                    trust_level=row[11],
+                    content_hash=row[12],
+                )
+
+    ordered = [chunks_by_id[cid] for cid in chunk_ids if cid in chunks_by_id]
+
+    enricher = LlmEnricher(
+        max_chunks=len(ordered),
+        store=store,
+        prompt_ver=prompt_ver,
+    )
+    errors: list[str] = []
+    try:
+        asyncio.run(enricher.enrich(ordered))
+    except Exception as exc:
+        errors.append(f"{type(exc).__name__}: {exc}")
+
+    docs_refreshed = 0
+    if not errors:
+        docs_refreshed = store.refresh_fts_for_docs(doc_ids, fp)
+
+    return {
+        "prompt_ver": prompt_ver,
+        "pending": len(pending),
+        "enriched": len(ordered),
+        "errors": errors,
+        "docs_refreshed": docs_refreshed,
+    }

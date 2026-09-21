@@ -23,6 +23,8 @@ PIPELINE: dict[str, Any] = {
     "id_format": "v2",
 }
 
+PROMPT_VER = "enrich_v1"
+
 
 def pipeline_fp() -> str:
     """Stable short hash of the boundary-affecting settings."""

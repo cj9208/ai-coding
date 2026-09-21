@@ -12,7 +12,6 @@ corpus-wide diff). See ``docs/rag/05-incremental-design.md``.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -20,10 +19,9 @@ from ocr_backend.render import document_markdown
 
 from .chunking import StructureAwareChunker
 from .contract import CanonicalDoc, PublishDecision
-from .enrich import LlmEnricher
 from .ingest import OcrBundleAcquirer
 from .store import RagStore
-from .tracing import NO_TRACER, TracedAcquirer, TracedChunker, TracedEnricher, Tracer
+from .tracing import NO_TRACER, TracedAcquirer, TracedChunker, Tracer
 from .versions import pipeline_fp
 
 INDEXABLE = frozenset({PublishDecision.pass_, PublishDecision.pass_with_warning})
@@ -44,7 +42,6 @@ def ingest(
     inbox: Path,
     data_dir: Path,
     *,
-    enrich: bool = False,
     limit: int = 0,
     store: RagStore | None = None,
     tracer: Tracer | None = None,
@@ -65,7 +62,7 @@ def ingest(
     }
     indexed_docs: list[CanonicalDoc] = []
 
-    with tracer.span("rag.ingest", inbox=str(inbox), enrich=enrich, fp=fp) as isp:
+    with tracer.span("rag.ingest", inbox=str(inbox), fp=fp) as isp:
         bundles = sorted(inbox.glob("*.ocr.json"))
         if limit > 0:
             bundles = bundles[:limit]
@@ -86,8 +83,6 @@ def ingest(
                 report["skipped_docs"] += 1
                 continue
             chunks = chunker.split(doc, fp=fp)
-            if enrich and chunks:
-                asyncio.run(TracedEnricher(LlmEnricher(), tracer).enrich(chunks))
             store.stage_document(doc, chunks, fp)
             indexed_docs.append(doc)
             report["chunked_docs"] += 1
@@ -134,17 +129,14 @@ def build(
     inbox: Path,
     data_dir: Path,
     *,
-    enrich: bool = False,
     store: RagStore | None = None,
     tracer: Tracer | None = None,
 ) -> dict[str, Any]:
     """Compose ingest + publish — kept for tests and toy corpora."""
     tracer = tracer or NO_TRACER
     store = store or RagStore(data_dir / "kb.db")
-    with tracer.span("rag.build", inbox=str(inbox), enrich=enrich) as rsp:
-        ingest_report = ingest(
-            inbox, data_dir, enrich=enrich, store=store, tracer=tracer
-        )
+    with tracer.span("rag.build", inbox=str(inbox)) as rsp:
+        ingest_report = ingest(inbox, data_dir, store=store, tracer=tracer)
         publish_report = publish(data_dir, store=store, tracer=tracer)
         rsp.set(
             corpus_version=publish_report["corpus_version"],
