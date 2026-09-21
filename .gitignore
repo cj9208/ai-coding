@@ -5,7 +5,6 @@ v/
 openspec-skills/
 repo-skills/
 .opencode/
-paddleocr-vl-1.6
 
 .env
 *.pyc

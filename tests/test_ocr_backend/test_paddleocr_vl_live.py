@@ -1,7 +1,9 @@
 """Live end-to-end OCR test — real model, real machine. Skipped by default.
 
 Enable with ``OCR_LIVE=1`` once the local model snapshot exists
-(``paddleocr-vl-1.6/`` at the repo root, see AGENTS.md). Uses the single-page
+(``data/ocr_backend/models/paddleocr-vl-1.6/``, provisioned by
+``ocr-backend download paddleocr-vl-1.6``; see AGENTS.md). The backend resolves
+it automatically, so the test also proves that path. Uses the single-page
 verification image to keep the run short; run ``shell_scipts/verify_paddle_vl_16.py``
 for the full six-item checklist. Set ``OCR_DEVICE=cpu`` to force CPU.
 """
@@ -12,10 +14,11 @@ import os
 import pytest
 
 from ocr_backend.backends.paddleocr_vl import PaddleOCRVLBackend, PaddleOCRVLConfig
+from ocr_backend.models import model_dir
 from ocr_backend.render import page_text
 from utils.paths import REPO_ROOT
 
-MODEL_DIR = REPO_ROOT / "paddleocr-vl-1.6"
+MODEL_DIR = model_dir("paddleocr-vl-1.6")
 MATERIAL = REPO_ROOT / "data" / "ocr_backend" / "verify" / "materials" / "page1.png"
 
 pytestmark = pytest.mark.skipif(
@@ -26,7 +29,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_parse_image_end_to_end():
     backend = PaddleOCRVLBackend(
-        PaddleOCRVLConfig(model_dir=MODEL_DIR, device=os.getenv("OCR_DEVICE") or None)
+        PaddleOCRVLConfig(device=os.getenv("OCR_DEVICE") or None)
     )
     try:
         doc = backend.parse(MATERIAL)

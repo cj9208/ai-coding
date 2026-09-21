@@ -34,13 +34,15 @@ the others, except where noted below.
 - Run tests: `uv run pytest`. Async tests work via `asyncio_mode = "auto"`
   (no markers needed).
 - CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`,
-  `research-agent` (`[project.scripts]`).
+  `research-agent`, `ocr-backend` (`[project.scripts]`).
 - `test_summarize_live` is the only test hitting a real LLM API (skipped when
   `LLM_API_KEY` unset). A 401 there means the key in `.env` is stale — an
   environment issue, not a code regression.
 - `tests/test_ocr_backend/test_paddleocr_vl_live.py` runs the real OCR model
-  (skipped unless `OCR_LIVE=1` and the local snapshot `paddleocr-vl-1.6/` is
-  present); the rest of `test_ocr_backend` is model-free golden-fixture work.
+  (skipped unless `OCR_LIVE=1` and the local snapshot under
+  `data/ocr_backend/models/` is present, provisioned by
+  `ocr-backend download paddleocr-vl-1.6`); the rest of `test_ocr_backend` is
+  model-free golden-fixture work.
 
 ## LLM access — one rule
 
@@ -59,7 +61,7 @@ are already there). Env convention lives only in
 |---|---|---|
 | `src/llm_client/` | shared LLM access point (see rule above) | — it *is* the LLM layer |
 | `src/storage/` | shared storage layer, one module per DB type in use (currently SQLite: `sqlite.py` engine/PRAGMA/session/ensure_columns/sha256_hex, `fts.py` fold_cjk/match_expr/FtsTable). Only generic access knowledge belongs here — table definitions and business stores stay in each project; see `docs/storage-usage-guide.md` | no |
-| `src/ocr_backend/` | shared OCR layer: one versioned `OcrDocument` contract (page → block, pixel bbox) + render projections (`page_text` / `document_markdown`); PaddleOCR-VL 1.6 is the first adapter (engine comes from the `paddle-cpu` / `paddle-gpu` extras — see `docs/ocr-backend-design.md` §7 for the GPU index gotcha). Consumers read the contract, never a backend's native output | no |
+| `src/ocr_backend/` | shared OCR layer: one versioned `OcrDocument` contract (page → block, pixel bbox) + render projections (`page_text` / `document_markdown`); PaddleOCR-VL 1.6 is the first adapter (engine comes from the `paddle-cpu` / `paddle-gpu` extras; model snapshots live under `data/ocr_backend/models/<name>/`, provisioned by `ocr-backend download <name>` (each model is one `models.MODELS` entry, pinned to a commit sha) and resolved via `ocr_backend.models.model_dir`; see `docs/ocr-backend-design.md` §7 for the GPU index gotcha). Consumers read the contract, never a backend's native output | no |
 | `src/pdf_summarizer/` | CLI: PDF → chunks → map-reduce summary | yes, via `llm_client` |
 | `src/ai_market_radar/` | scans OpenAI/Anthropic/Copilot **news sources** into SQLite, digest of new items. "OpenAI" here is a watched entity, not a dependency. Deterministic parsing on purpose — no LLM | no |
 | `src/file_manager/` | FastAPI file manager, metadata-first search (FTS5) | no |

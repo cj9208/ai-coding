@@ -95,6 +95,10 @@ async def test_summarize_style_prompts(sample_pdf_path):
 
 @pytest.mark.asyncio
 async def test_summarize_empty_pdf(empty_pdf_path, llm_config):
+    # Pinned to the non-OCR backend on purpose: with "auto" this test would
+    # load the real OCR model on machines that have it installed. Model runs
+    # belong to the OCR_LIVE-gated tests (see AGENTS.md).
+    llm_config.extractor_backend = "pymupdf"
     with pytest.raises(ValueError, match="extractable"):
         await summarize(empty_pdf_path, llm_config)
 

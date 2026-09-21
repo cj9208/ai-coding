@@ -6,12 +6,13 @@ verification run (2026-09-21, paddleocr 3.7.0 / PaddleOCR-VL-1.6-0.9B, see
 exactly these tests: new model → new sidecars → mapping diff shows every change.
 """
 
+import builtins
 import json
 from pathlib import Path
 
 import pytest
 
-from ocr_backend.backends import OcrBackend
+from ocr_backend.backends import OcrBackend, paddleocr_vl
 from ocr_backend.backends.paddleocr_vl import (
     PaddleOCRVLBackend,
     PaddleOCRVLConfig,
@@ -227,3 +228,44 @@ def test_backend_is_lazy_and_validates_source():
         backend.parse(FIXTURES / "no_such_file.pdf")
     # Constructing and failing on a missing file must not have touched the engine.
     assert backend._pipeline is None
+
+
+def test_missing_engine_reports_install_hint(monkeypatch):
+    """Without the engine installed, the ImportError names the exact extras to
+    install (moved here with the pdf_summarizer migration — its old backend
+    carried the only copy of this hint)."""
+    original_import = builtins.__import__
+
+    def import_without_paddleocr(name, *args, **kwargs):
+        if name == "paddleocr":
+            raise ImportError("paddleocr is unavailable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_paddleocr)
+
+    with pytest.raises(ImportError, match=r"uv sync --extra ocr --extra paddle-cpu"):
+        PaddleOCRVLBackend()._ensure_pipeline()
+
+
+def test_repo_snapshot_is_preferred_when_present(monkeypatch, tmp_path):
+    """``model_dir=None``: the repo store (``data/ocr_backend/models/``) wins once
+    the snapshot is fully downloaded; until then the engine's own cache is used."""
+    monkeypatch.setattr(paddleocr_vl, "model_dir", lambda name: tmp_path / name)
+
+    assert "vl_rec_model_dir" not in PaddleOCRVLBackend()._pipeline_kwargs()
+
+    snapshot = tmp_path / "paddleocr-vl-1.6"
+    snapshot.mkdir()
+    (snapshot / "model.safetensors").write_bytes(b"")
+    kwargs = PaddleOCRVLBackend()._pipeline_kwargs()
+    assert kwargs["vl_rec_model_dir"] == str(snapshot)
+
+
+def test_explicit_model_dir_beats_repo_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        paddleocr_vl, "model_dir", lambda name: tmp_path / "store" / name
+    )
+    explicit = tmp_path / "explicit"
+
+    backend = PaddleOCRVLBackend(PaddleOCRVLConfig(model_dir=explicit))
+    assert backend._pipeline_kwargs()["vl_rec_model_dir"] == str(explicit)

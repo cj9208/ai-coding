@@ -48,6 +48,7 @@ from ..contract import (
     OcrPage,
     OcrSource,
 )
+from ..models import is_ready, model_dir
 
 _LABEL_TO_KIND: dict[str, BlockKind] = {
     # PP-DocLayoutV3's full vocabulary (25 labels, read from the model's
@@ -254,8 +255,9 @@ class PaddleOCRVLConfig:
     """``"gpu"`` / ``"cpu"`` / ``"gpu:0"``; ``None`` = engine default (GPU if available)."""
 
     model_dir: str | Path | None = None
-    """Local snapshot of the VL model (this repo keeps one in
-    ``paddleocr-vl-1.6/``); ``None`` = official download/cache."""
+    """Override for the VL weights directory. ``None`` (default) prefers the
+    repo-local snapshot in ``data/ocr_backend/models/paddleocr-vl-1.6/`` when
+    present, else the engine's official download/cache."""
 
     use_layout_detection: bool = True
     use_doc_orientation_classify: bool = False
@@ -279,6 +281,20 @@ class PaddleOCRVLConfig:
     never carries it."""
 
     extra_params: dict[str, Any] = field(default_factory=dict)
+
+
+#: Repo-local weights snapshot, provisioned by ``ocr-backend download``.
+_SNAPSHOT_NAME = "paddleocr-vl-1.6"
+
+
+def _resolve_model_dir(cfg: PaddleOCRVLConfig) -> Path | None:
+    """Explicit ``cfg.model_dir`` wins; ``None`` prefers the repo snapshot when
+    it is fully downloaded (see :func:`ocr_backend.models.model_dir`), else the
+    engine's official download/cache."""
+    if cfg.model_dir:
+        return Path(cfg.model_dir)
+    snapshot = model_dir(_SNAPSHOT_NAME)
+    return snapshot if is_ready(snapshot) else None
 
 
 class PaddleOCRVLBackend:
@@ -355,8 +371,14 @@ class PaddleOCRVLBackend:
 
     def _ensure_pipeline(self) -> Any:
         if self._pipeline is None:
-            from paddleocr import PaddleOCRVL
-
+            try:
+                from paddleocr import PaddleOCRVL
+            except ImportError as e:
+                raise ImportError(
+                    "paddleocr is required for the PaddleOCR-VL backend. Install "
+                    "the OCR extras with: uv sync --extra ocr --extra paddle-cpu "
+                    "(CPU) or uv sync --extra ocr --extra paddle-gpu (GPU)"
+                ) from e
             self._pipeline = PaddleOCRVL(**self._pipeline_kwargs())
         return self._pipeline
 
@@ -374,8 +396,9 @@ class PaddleOCRVLBackend:
         }
         if cfg.device:
             kwargs["device"] = cfg.device
-        if cfg.model_dir:
-            kwargs["vl_rec_model_dir"] = str(cfg.model_dir)
+        resolved_model_dir = _resolve_model_dir(cfg)
+        if resolved_model_dir is not None:
+            kwargs["vl_rec_model_dir"] = str(resolved_model_dir)
         if cfg.vl_rec_backend:
             kwargs["vl_rec_backend"] = cfg.vl_rec_backend
         if cfg.vl_rec_server_url:

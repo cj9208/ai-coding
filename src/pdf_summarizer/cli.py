@@ -20,7 +20,7 @@ def main():
     )
     parser.add_argument(
         "--backend",
-        choices=["auto", "pymupdf", "paddleocr"],
+        choices=["auto", "pymupdf", "paddleocr-vl"],
         default=None,
         help="Extractor backend (default: auto)",
     )

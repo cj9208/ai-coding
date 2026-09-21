@@ -9,7 +9,7 @@ class ExtractorBackend(ABC):
 
 
 async def auto_extract(filepath: str, backends: list[ExtractorBackend]) -> Document:
-    last_error = None
+    first_error = None
     for backend in backends:
         try:
             doc = await backend.extract(filepath)
@@ -19,8 +19,15 @@ async def auto_extract(filepath: str, backends: list[ExtractorBackend]) -> Docum
         except ImportError:
             continue
         except Exception as e:
-            last_error = e
+            # Keep the *first* backend's diagnosis: backends are ordered by
+            # preference (PyMuPDF first, OCR fallback last), so the primary
+            # backend's verdict — "corrupted or invalid", "no extractable
+            # text" — is the one a caller can act on. A fallback's error is
+            # just a failed attempt (e.g. the OCR engine's RuntimeError on a
+            # corrupted input), not a better description of the problem.
+            if first_error is None:
+                first_error = e
             continue
-    if last_error:
-        raise last_error
+    if first_error:
+        raise first_error
     raise ValueError(f"No extractable text found in {filepath}")

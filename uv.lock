@@ -42,8 +42,8 @@ dependencies = [
 
 [package.optional-dependencies]
 ocr = [
+    { name = "huggingface-hub" },
     { name = "paddleocr", extra = ["doc-parser"] },
-    { name = "pdf2image" },
 ]
 paddle-cpu = [
     { name = "paddlepaddle", marker = "platform_machine == 'AMD64' or platform_machine == 'x86_64'" },
@@ -64,6 +64,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "feedparser", specifier = ">=6.0.14" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "huggingface-hub", marker = "extra == 'ocr'", specifier = ">=1.0" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "markdownify", specifier = ">=1.2.3" },
     { name = "openai", specifier = ">=1.100.0" },
@@ -72,7 +73,6 @@ requires-dist = [
     { name = "paddlepaddle", marker = "(platform_machine == 'AMD64' and extra == 'paddle-cpu') or (platform_machine == 'x86_64' and extra == 'paddle-cpu')", specifier = ">=3.2.0" },
     { name = "paddlepaddle-gpu", marker = "(platform_machine == 'AMD64' and sys_platform != 'darwin' and extra == 'paddle-gpu') or (platform_machine == 'x86_64' and sys_platform != 'darwin' and extra == 'paddle-gpu')", specifier = ">=3.2.1", index = "https://www.paddlepaddle.org.cn/packages/stable/cu126/" },
     { name = "pandas", specifier = ">=2.3.3" },
-    { name = "pdf2image", marker = "extra == 'ocr'", specifier = ">=1.17.0" },
     { name = "pydantic", specifier = ">=2.13.3" },
     { name = "pymupdf", specifier = ">=1.26.0" },
     { name = "python-docx", specifier = ">=1.1" },
@@ -1889,18 +1889,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a4/1e/1bac1a839d12e6a82ec6cb40cda2edde64a2013a66963293696bbf31fbbb/pandas-2.3.3-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:2e3ebdb170b5ef78f19bfb71b0dc5dc58775032361fa188e814959b74d726dd5", size = 12121582, upload-time = "2025-09-29T23:30:43.391Z" },
     { url = "https://files.pythonhosted.org/packages/44/91/483de934193e12a3b1d6ae7c8645d083ff88dec75f46e827562f1e4b4da6/pandas-2.3.3-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:d051c0e065b94b7a3cea50eb1ec32e912cd96dba41647eb24104b6c6c14c5788", size = 12699963, upload-time = "2025-09-29T23:31:10.009Z" },
     { url = "https://files.pythonhosted.org/packages/70/44/5191d2e4026f86a2a109053e194d3ba7a31a2d10a9c2348368c63ed4e85a/pandas-2.3.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:3869faf4bd07b3b66a9f462417d0ca3a9df29a9f6abd5d0d0dbab15dac7abe87", size = 13202175, upload-time = "2025-09-29T23:31:59.173Z" },
-]
-
-[[package]]
-name = "pdf2image"
-version = "1.17.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pillow" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/00/d8/b280f01045555dc257b8153c00dee3bc75830f91a744cd5f84ef3a0a64b1/pdf2image-1.17.0.tar.gz", hash = "sha256:eaa959bc116b420dd7ec415fcae49b98100dda3dd18cd2fdfa86d09f112f6d57", size = 12811, upload-time = "2024-01-07T20:33:01.965Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/62/33/61766ae033518957f877ab246f87ca30a85b778ebaad65b7f74fa7e52988/pdf2image-1.17.0-py3-none-any.whl", hash = "sha256:ecdd58d7afb810dffe21ef2b1bbc057ef434dabbac6c33778a38a3f7744a27e2", size = 11618, upload-time = "2024-01-07T20:32:59.957Z" },
 ]
 
 [[package]]

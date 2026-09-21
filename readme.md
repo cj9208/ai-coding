@@ -16,5 +16,4 @@ PDF text extraction uses PyMuPDF by default. For scanned PDFs, install the `ocr`
 frontend plus one engine on a supported x86_64 platform (reported as `AMD64` on
 Windows): `uv sync --extra ocr --extra paddle-cpu`, or `--extra ocr --extra
 paddle-gpu` for the GPU engine, which resolves from Paddle's official cu126
-index (Windows and Linux only). OCR also requires Poppler to be installed on
-the host for `pdf2image`.
+index (Windows and Linux only).

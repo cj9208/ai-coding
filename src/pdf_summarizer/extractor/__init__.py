@@ -1,20 +1,20 @@
 from ..models import Document
 from .base import ExtractorBackend, auto_extract
-from .paddle_ocr import PaddleOCRBackend
+from .paddle_vl import PaddleVLBackend
 from .pymupdf import PyMuPDFBackend
 
 
 def create_extractor(name: str = "auto") -> ExtractorBackend:
     if name == "pymupdf":
         return PyMuPDFBackend()
-    elif name == "paddleocr":
-        return PaddleOCRBackend()
+    elif name == "paddleocr-vl":
+        return PaddleVLBackend()
     elif name == "auto":
-        return _AutoBackend([PyMuPDFBackend(), PaddleOCRBackend()])
+        return _AutoBackend([PyMuPDFBackend(), PaddleVLBackend()])
     else:
         raise ValueError(
             f"Unknown extractor backend: {name!r}. "
-            f"Use 'auto', 'pymupdf', or 'paddleocr'."
+            f"Use 'auto', 'pymupdf', or 'paddleocr-vl'."
         )
 
 

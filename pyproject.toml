@@ -33,7 +33,7 @@ dependencies = [
 #   GPU: uv sync --extra ocr --extra paddle-gpu
 ocr = [
     "paddleocr[doc-parser]>=3.7.0",
-    "pdf2image>=1.17.0",
+    "huggingface_hub>=1.0",   # `ocr-backend download` 拉模型快照
 ]
 paddle-cpu = [
     "paddlepaddle>=3.2.0; platform_machine == 'AMD64' or platform_machine == 'x86_64'",
@@ -49,6 +49,7 @@ pdf-summarize = "pdf_summarizer.cli:main"
 ai-market-radar = "ai_market_radar.cli:main"
 file-manager = "file_manager.cli:main"
 research-agent = "research_agent.cli:main"
+ocr-backend = "ocr_backend.cli:main"
 
 [dependency-groups]
 dev = [

@@ -11,6 +11,8 @@ Layout::
     ocr_backend/
       contract.py       # OcrDocument & friends — data only, import freely
       render.py         # projections: page_text / document_markdown
+      models.py         # local model snapshots: data/ocr_backend/models/<name>/
+      cli.py            # `ocr-backend download <name>` — one-command provisioning
       backends/         # adapters, each importing its engine lazily
 
 The contract and render layers are light (pydantic only); a backend drags in
@@ -46,6 +48,7 @@ from .contract import (
     OcrPage,
     OcrSource,
 )
+from .models import model_dir
 from .render import document_markdown, page_text
 
 __all__ = [
@@ -58,5 +61,6 @@ __all__ = [
     "OcrPage",
     "OcrSource",
     "document_markdown",
+    "model_dir",
     "page_text",
 ]
