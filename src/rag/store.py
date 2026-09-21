@@ -594,8 +594,17 @@ class RagStore:
         addressing, readable in the JSONL)."""
         if not substrings:
             return set()
-        clauses = " AND ".join(f"text LIKE :s{i}" for i in range(len(substrings)))
-        params: dict[str, Any] = {f"s{i}": f"%{s}%" for i, s in enumerate(substrings)}
+
+        def _escape_like(s: str) -> str:
+            """Escape LIKE wildcards so they match literally."""
+            return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+        clauses = " AND ".join(
+            f"text LIKE :s{i} ESCAPE '\\'" for i in range(len(substrings))
+        )
+        params: dict[str, Any] = {
+            f"s{i}": f"%{_escape_like(s)}%" for i, s in enumerate(substrings)
+        }
         params["v"] = version
         with self.client.session() as db:
             rows = db.execute(
