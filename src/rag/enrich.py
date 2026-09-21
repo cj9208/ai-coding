@@ -89,15 +89,15 @@ class LlmEnricher:
     async def enrich(self, chunks: list[Any]) -> None:
         client = self.client or get_client()
 
-        todo: list[Any] = []
-        for chunk in chunks[: self.max_chunks]:
-            if chunk.is_parent:
-                continue
-            if self.store is not None and _already_enriched(
-                self.store, chunk.chunk_id, self.prompt_ver
-            ):
-                continue
-            todo.append(chunk)
+        candidates = [c for c in chunks[: self.max_chunks] if not c.is_parent]
+
+        if self.store is not None and candidates:
+            done = _batch_already_enriched(
+                self.store, [c.chunk_id for c in candidates], self.prompt_ver
+            )
+            candidates = [c for c in candidates if c.chunk_id not in done]
+
+        todo = candidates
 
         if not todo:
             return
@@ -159,17 +159,27 @@ class LlmEnricher:
             await q.stop()
 
 
-def _already_enriched(store: RagStore, chunk_id: str, prompt_ver: str) -> bool:
+def _batch_already_enriched(
+    store: RagStore, chunk_ids: list[str], prompt_ver: str
+) -> set[str]:
+    """Return the subset of *chunk_ids* that already have an inferred row
+    for *prompt_ver*. Single query instead of one-per-chunk."""
     from sqlalchemy import text
 
+    if not chunk_ids:
+        return set()
+    placeholders = ", ".join(f":c{i}" for i in range(len(chunk_ids)))
+    params = {f"c{i}": cid for i, cid in enumerate(chunk_ids)}
+    params["pv"] = prompt_ver
     with store.client.session() as db:
-        row = db.execute(
+        rows = db.execute(
             text(
-                "SELECT 1 FROM inferred" " WHERE chunk_id = :cid AND prompt_ver = :pv"
+                f"SELECT chunk_id FROM inferred"  # nosec B608
+                f" WHERE prompt_ver = :pv AND chunk_id IN ({placeholders})"
             ),
-            {"cid": chunk_id, "pv": prompt_ver},
-        ).first()
-    return row is not None
+            params,
+        ).fetchall()
+    return {r[0] for r in rows}
 
 
 def enrich_corpus(
