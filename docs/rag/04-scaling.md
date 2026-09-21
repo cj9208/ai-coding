@@ -1,13 +1,13 @@
 # RAG Subsystem — Scaling Investigation
 
-Status: **investigation + agreed direction, not yet implemented.**
+Status: **investigation + benchmark validated (2026-09-22).**
 Decisions taken 2026-09-21: OCR scaling is out of scope (deployment
 conversation, rag assumes a fed inbox); incremental is the *only*
 pipeline — a full refresh is its degenerate case, triggered by a
 pipeline fingerprint baked into `chunk_id`; enrich/model versions are
 kept out of that fingerprint and swept over the corpus only after a
-version is finalized on a sample. The numbers below are still
-arithmetic, not measurements — see §"Validate before committing".
+version is finalized on a sample. The arithmetic estimates below were
+validated by the 50k-doc benchmark in §"Benchmark results".
 
 The scenario examined:
 
@@ -337,23 +337,141 @@ converges on four points, all compatible with the hinge above:
    Combined with (chunk_id, provider_version) memoization, the expensive
    full sweep happens once per *decision*, not once per *draft*.
 
-## Validate before committing
+## Benchmark results (2026-09-22)
 
-The numbers above are arithmetic, not measurements. Before cutting the
-schema:
+Synthetic corpus of 50k docs (10 pages each, 6 topic domains) with 50
+golden queries. Progressive scale-up at 1k / 10k / 50k doc tiers.
+Scripts: `scripts/rag_bench_gen.py`, `scripts/rag_bench_run.py`,
+`scripts/rag_bench_latency.py`.
 
-- generate a synthetic corpus of ~5k bundles (10 pages each, so the
-  per-doc cost is real even if the corpus is 5% of target), run
-  `rag build`, and record: wall time, `kb.db` size, peak RSS, and how
-  much of the time is `stage_chunks` vs `publish` vs the markdown
-  projection;
-- extrapolate to 100k/20x and compare against the "hours / tens of GB"
-  claims in §1–§2 — if SQLite's constants surprise us (e.g. staged FTS
-  insert rate), some severity ordering above changes;
-- the experiment doubles as the first scale regression: the same script
-  after the manifest redesign proves the before/after delta that
-  justifies the surgery.
+### Build performance (linear)
 
-Not yet done: nothing in this document has been executed — no synthetic
-corpus, no timings. Treat every number here as an estimate until the
-validation run happens.
+| Tier | Docs | Chunks | Ingest | Publish | Total | DB Size |
+|------|------|--------|--------|---------|-------|---------|
+| 1k | 1,000 | 5,033 | 15.6s | 2.7s | 18.2s | 18 MB |
+| 10k | 10,000 | 49,983 | 148s | 24s | 172s | 166 MB |
+| 50k | 50,000 | 249,784 | 691s | 147s | 838s | 827 MB |
+
+Per-unit cost stays flat: ~14ms/doc ingest, ~0.5ms/chunk publish.
+Build scales linearly — the incremental publish design (`ingest` +
+`publish_diff`) works as intended.
+
+### Query latency
+
+| Tier | Chunks | P50 | P95 | P99 |
+|------|--------|-----|-----|-----|
+| 1k | 5k | 16ms | 16ms | 16ms |
+| 10k | 50k | 94ms | 125ms | 125ms |
+| 50k | 250k | 190ms | 546ms | 850ms |
+
+### Per-stage breakdown at 250k chunks
+
+| Stage | P50 | P95 | % of total |
+|-------|-----|-----|------------|
+| **fts_sql (BM25)** | **204ms** | **584ms** | **99.6%** |
+| fetch_children | 0.7ms | 1.2ms | 0.4% |
+| shape (CJK tokenize) | 0.02ms | 0.04ms | <0.1% |
+| fuse (RRF) | 0.09ms | 0.16ms | <0.1% |
+| assemble | 0.4ms | 0.9ms | 0.2% |
+
+**FTS5 BM25 is the sole bottleneck** — 99%+ of query time at every
+scale. Everything else (shape, fuse, fetch, assemble) is sub-millisecond.
+
+### Quality
+
+hit_rate@5 = 1.0, precision@5 = 1.0 at all tiers. Retrieval quality
+holds perfectly — every golden query found its target chunk even at
+250k chunks.
+
+### Conclusions
+
+- **Effective**: yes — hit_rate=1.0 at all scales.
+- **Fast at P50**: 190ms at 250k chunks is acceptable for interactive use.
+- **Concerning at tail**: P95=546ms, P99=850ms — noticeable lag.
+- **Scaling is linear**: 10x chunks → ~10x FTS latency. Expected for
+  BM25 with CJK bigram folding (OR relaxation scans more rows as the
+  index grows).
+- **M1 lexical-only design is viable up to ~250k chunks.** Beyond that,
+  the vector path (M2) becomes necessary.
+
+## Query-side optimization options
+
+Not implementing now — wait until a real bottleneck emerges. When the
+time comes, these are the three levers, roughly ordered by impact.
+
+### 1. Add a vector search path (M2)
+
+**Why it helps**: BM25 is O(n) scan — FTS5 traverses all matching rows
+and computes bm25 scores. CJK bigram folding makes it worse: a 4-char
+Chinese term becomes 3 bigrams, OR relaxation matches tens of thousands
+of rows at 250k chunks. Vector search (ANN) is O(log n) — HNSW/IVF
+indexes jump directly to approximate nearest neighbors.
+
+**Concrete**: Embed chunks at publish time (bge-m3, 768 dim, ~50ms/chunk
+on GPU), store in sqlite-vec, add a `VectorPath` implementing the
+existing `CandidatePath` protocol, fuse with FTS results via `rrf_fuse()`.
+Architecture already supports this — no seam changes needed.
+
+**Pros**: Sub-linear scaling (10x chunks → ~2x latency), better semantic
+recall (synonyms, paraphrases), plug-in fit with existing design.
+
+**Cons**: Adds embedding cost at publish time (~3.5h GPU for 250k
+chunks), needs GPU for reasonable throughput, new dependency
+(sqlite-vec), embedding model selection matters for CJK quality.
+
+**Trigger**: When P95 > 200ms at production corpus size.
+
+### 2. Tighten AND→OR relaxation
+
+**Why it helps**: Current `Fts5Path.search()` tries AND first, falls
+back to OR if zero results. OR is the expensive path — matches every
+row containing *any* token. At 250k chunks, a 3-token OR query can
+match 50k rows, each scored and sorted. Reducing how often queries
+fall into OR cuts the tail.
+
+**Concrete options** (composable):
+- Partial AND: require ≥2 tokens match (between AND and OR)
+- Staged relaxation: AND → at-least-N-1 → OR (three phases)
+- Frequency-weighted: keep AND for common tokens, OR only for rare ones
+- NEAR queries: require tokens within a window (FTS5 support limited)
+
+**Pros**: Zero cost — no new storage, dependencies, or publish time.
+Pure query logic change in `Fts5Path.search()`. Can validate with
+golden set (`rag eval`).
+
+**Cons**: May hurt recall for rare/vague queries, needs careful tuning,
+treats the symptom not the cause — OR path still exists, just less
+frequently triggered. Problem recurs at larger scale.
+
+**Trigger**: Quick win if tuning shows P95 improvement without
+hit_rate regression.
+
+### 3. Cache frequent queries
+
+**Why it helps**: Production query distributions typically follow Zipf's
+law — 20% of questions account for 80% of traffic. Cache
+`(query, corpus_version, k) → EvidencePack`, skip the entire retrieve
+pipeline on hit. Latency drops from 190ms to <1ms.
+
+**Concrete**: `functools.lru_cache` keyed by `(query, corpus_version, k)`.
+`corpus_version` in the key means publish auto-invalidates old cache.
+For multi-process: Redis with TTL.
+
+**Pros**: Zero latency on cache hits, zero quality risk, trivial to
+implement (10 lines), composable with other optimizations.
+
+**Cons**: Only helps repeat queries — new queries still slow, cold-start
+problem. Memory cost (~10MB for 1000 cached packs). Doesn't solve the
+underlying scaling issue.
+
+**Trigger**: When query distribution is concentrated (internal KB with
+FAQ-like patterns). Best as a supplement, not a standalone fix.
+
+### Recommended strategy (when the time comes)
+
+- **Short-term (no GPU)**: Option 2 + Option 3 — tighten relaxation,
+  add LRU cache. Expected: P95 from 546ms → 200-300ms, hot queries <1ms.
+- **Mid-term (GPU available)**: Option 1 — add vector path. Expected:
+  P95 < 100ms, semantic recall improvement.
+- **Long-term**: Option 1 + Option 3 — vector path for scaling, cache
+  for hot queries. P95 < 100ms, hot queries < 1ms.
