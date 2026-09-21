@@ -1,1 +1,1 @@
-"""Small shared helpers (currently: timer decorator)."""
+"""Small shared helpers (paths: repo-root-anchored data dirs; timer)."""

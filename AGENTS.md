@@ -77,7 +77,8 @@ are already there). Env convention lives only in
 | `src/ai_market_radar/` | scans OpenAI/Anthropic/Copilot **news sources** into SQLite, digest of new items. "OpenAI" here is a watched entity, not a dependency. Deterministic parsing on purpose — no LLM | no |
 | `src/file_manager/` | FastAPI file manager, metadata-first search (FTS5) | no |
 | `src/research_agent/` | research & recommendation agent — **MVP implemented & live-verified 2026-09-20** (`research-agent new/answer/status/report`); design docs in `docs/research-recommendation-agent/` (read `00-overview.md` first, `06-usage-guide.md` to run it), module layout mirrors the docs (orchestrator/research/clarifying/recommendation/contracts/persistence — the storage subpackage was renamed to dodge the top-level `storage` clash) | yes, via `llm_client` |
-| `src/coding/`, `src/modules/` | standalone algorithm exercises and small one-off scripts (e.g. `analyze_birth.py`, `analyze_package_size.py` — root-level scripts were moved into `modules/` to keep `src/` clean) | no |
+| `src/coding/`, `src/modules/` | standalone algorithm exercises and small one-off scripts (e.g. `analyze_birth.py`, `analyze_package_size.py` — root-level scripts were moved into `modules/` to keep `src/` clean), plus `seating_app.py`: a Streamlit classroom-seating app (`streamlit run src/modules/seating_app.py`, uploads its own Excel) — it is why streamlit/pandas/openpyxl/xlsxwriter sit in the core deps | no |
+| `scripts/` | kept-for-the-record verification scripts, one per investigation (`verify_paddle_vl_16.py` is the evidence trail behind `docs/ocr-backend-design.md` §5.3). Machine-local helpers here are gitignored, not deleted — add new ones to `.gitignore` deliberately | no |
 | `opencode/` | design proposals produced by AI coding tools (documentation) | — |
 
 ## Storage conventions
@@ -124,10 +125,21 @@ are already there). Env convention lives only in
 
 ## Style & checks
 
-- Pre-commit hooks run on commit: black (`py312`), flake8 (max-line 100),
-  isort (black profile), mypy, bandit, commitizen. Format violations are
-  auto-fixed by the hook and the **commit is aborted** — re-stage the
-  reformatted files and commit again (new commit, never amend).
+- Tool settings have **one home**: black + isort + mypy in `pyproject.toml`
+  (`[tool.black]`, `[tool.isort]`, `[tool.mypy]` — including
+  `ignore_missing_imports` overrides for the stub-less third-party list),
+  flake8 in `.flake8` (max-line 100, extend-ignore E203).
+- black / flake8 / isort / mypy / bandit are **local pre-commit hooks running
+  the project venv** (they sit in the dev group, pinned by `uv.lock`) — one
+  version everywhere, so the hook, the editor and `uv run black` can never
+  fight over style. Bump a tool by editing pyproject + `uv lock`.
+- The venv-based mypy sees the real installed deps, so optional extras like
+  `paddleocr` don't produce phantom import errors (documented ignores cover
+  the stub-less ones). Every `src/` package ships `py.typed`.
+- Pre-commit also runs: trailing whitespace, end-of-file, check-yaml,
+  commitizen. Format violations are auto-fixed by the hook and the
+  **commit is aborted** — re-stage the reformatted files and commit again
+  (new commit, never amend).
 - Tests mirror the source layout: `tests/test_<project>/test_<module>.py`.
 - Commit messages: short, lowercase, imperative ("add file manager with
   graded metadata search"); mention the *why* in the body when non-obvious.

@@ -30,10 +30,6 @@ of truth for completed work.
       browser here can only dispatch synthetic pointer events — start
       `uv run ocr-review serve` and draw one box on http://127.0.0.1:8765 to
       close the gap.
-- [ ] `scripts/verify_paddle_vl_16.py` is still untracked. It produced the
-      engine facts the adapter documents, so it is either worth committing or
-      worth deleting — keeping it untracked means the evidence trail for
-      `docs/ocr-backend-design.md` §5.3 exists only on this machine.
 
 ## Next, if the demand is real
 
