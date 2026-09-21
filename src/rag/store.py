@@ -282,7 +282,7 @@ class RagStore:
                     params,
                 )
 
-            # step 6-8: FTS diff
+            # step 6-8: FTS diff (batched to avoid N+1 queries)
             # get old manifest's (doc_id, fp) pairs
             old_pairs: set[tuple[str, str]] = set()
             if active is not None:
@@ -301,43 +301,15 @@ class RagStore:
             ).fetchall()
             new_pairs = {(r[0], r[1]) for r in new_rows}
 
-            # upsert FTS for newly listed pairs
+            # upsert FTS for newly listed pairs (batched)
             added = new_pairs - old_pairs
-            for doc_id, doc_fp in added:
-                chunk_rows = db.execute(
-                    text("""SELECT rowid, chunk_id, section_path, text
-                           FROM chunks WHERE doc_id = :doc_id AND pipeline_fp = :fp
-                           AND is_parent = 0"""),
-                    {"doc_id": doc_id, "fp": doc_fp},
-                ).fetchall()
-                for cr in chunk_rows:
-                    inf = self._load_inferred(db, cr.chunk_id)
-                    self.fts.upsert(
-                        db,
-                        cr.rowid,
-                        {
-                            "title": inf.get("title", "")
-                            or cr.section_path.split(" > ")[-1],
-                            "body": cr.text,
-                            "section_path": cr.section_path,
-                            "keywords": inf.get("keywords", ""),
-                            "summary": inf.get("summary", ""),
-                        },
-                    )
+            if added:
+                self._batch_upsert_fts(db, added)
 
-            # delete FTS for retracted/replaced pairs
+            # delete FTS for retracted/replaced pairs (batched)
             removed = old_pairs - new_pairs
-            for doc_id, doc_fp in removed:
-                chunk_rows = db.execute(
-                    text("""SELECT rowid FROM chunks
-                           WHERE doc_id = :doc_id AND pipeline_fp = :fp"""),
-                    {"doc_id": doc_id, "fp": doc_fp},
-                ).fetchall()
-                for cr in chunk_rows:
-                    db.execute(
-                        text("DELETE FROM chunks_fts WHERE rowid = :rid"),
-                        {"rid": cr[0]},
-                    )
+            if removed:
+                self._batch_delete_fts(db, removed)
 
             # step 9: snapshot row
             doc_count = len(new_pairs)
@@ -399,6 +371,105 @@ class RagStore:
         if not row:
             return {}
         return {"title": row[0], "keywords": row[1], "summary": row[2]}
+
+    def _batch_upsert_fts(self, db: Any, doc_pairs: set[tuple[str, str]]) -> None:
+        """Batch upsert FTS for multiple (doc_id, fp) pairs.
+
+        Loads all chunks and inferred data in bulk queries instead of
+        per-doc/per-chunk N+1 patterns.
+        """
+        # build a query to fetch all chunks for the given (doc_id, fp) pairs
+        conditions = []
+        params: dict[str, Any] = {}
+        for i, (doc_id, doc_fp) in enumerate(doc_pairs):
+            conditions.append(f"(doc_id = :d{i} AND pipeline_fp = :f{i})")
+            params[f"d{i}"] = doc_id
+            params[f"f{i}"] = doc_fp
+
+        if not conditions:
+            return
+
+        where_clause = " OR ".join(conditions)
+        chunk_rows = db.execute(
+            text(
+                f"SELECT rowid, chunk_id, section_path, text FROM chunks "  # nosec B608
+                f"WHERE is_parent = 0 AND ({where_clause})"
+            ),
+            params,
+        ).fetchall()
+
+        if not chunk_rows:
+            return
+
+        # batch load all inferred data for these chunks
+        chunk_ids = [cr.chunk_id for cr in chunk_rows]
+        inferred_map = self._batch_load_inferred(db, chunk_ids)
+
+        # upsert FTS for each chunk
+        for cr in chunk_rows:
+            inf = inferred_map.get(cr.chunk_id, {})
+            self.fts.upsert(
+                db,
+                cr.rowid,
+                {
+                    "title": inf.get("title", "") or cr.section_path.split(" > ")[-1],
+                    "body": cr.text,
+                    "section_path": cr.section_path,
+                    "keywords": inf.get("keywords", ""),
+                    "summary": inf.get("summary", ""),
+                },
+            )
+
+    def _batch_delete_fts(self, db: Any, doc_pairs: set[tuple[str, str]]) -> None:
+        """Batch delete FTS rows for multiple (doc_id, fp) pairs."""
+        conditions = []
+        params: dict[str, Any] = {}
+        for i, (doc_id, doc_fp) in enumerate(doc_pairs):
+            conditions.append(f"(doc_id = :d{i} AND pipeline_fp = :f{i})")
+            params[f"d{i}"] = doc_id
+            params[f"f{i}"] = doc_fp
+
+        if not conditions:
+            return
+
+        where_clause = " OR ".join(conditions)
+        chunk_rows = db.execute(
+            text(f"SELECT rowid FROM chunks WHERE {where_clause}"),  # nosec B608
+            params,
+        ).fetchall()
+
+        for cr in chunk_rows:
+            db.execute(
+                text("DELETE FROM chunks_fts WHERE rowid = :rid"),
+                {"rid": cr[0]},
+            )
+
+    def _batch_load_inferred(
+        self, db: Any, chunk_ids: list[str]
+    ) -> dict[str, dict[str, str]]:
+        """Load the latest inferred row for multiple chunks in one query.
+
+        Uses a window function to pick the most recent row per chunk_id.
+        """
+        if not chunk_ids:
+            return {}
+
+        placeholders = ", ".join(f":c{i}" for i in range(len(chunk_ids)))
+        params = {f"c{i}": cid for i, cid in enumerate(chunk_ids)}
+
+        rows = db.execute(
+            text(f"""SELECT chunk_id, title, keywords, summary FROM (
+                       SELECT chunk_id, title, keywords, summary,
+                              ROW_NUMBER() OVER (
+                                  PARTITION BY chunk_id ORDER BY created_at DESC
+                              ) AS rn
+                       FROM inferred
+                       WHERE chunk_id IN ({placeholders})
+                   ) WHERE rn = 1"""),  # nosec B608
+            params,
+        ).fetchall()
+
+        return {r[0]: {"title": r[1], "keywords": r[2], "summary": r[3]} for r in rows}
 
     def _active_in(self, db: Any) -> int | None:
         row = db.execute(
