@@ -107,12 +107,114 @@ fields today; the `representations` seam can carry "summary: absent").
 ### 6. M2 vectors force a storage decision
 
 `embeddings` (BLOB + PK, no index) brute-force-scans. 3–5M × 1024-dim
-float32 ≈ 12–20GB of vectors; a scan per query is out. Options, cheapest
-first: `sqlite-vec` (stay in SQLite, smallest diff) → Postgres + pgvector
-(via `src/storage`, but the publish/manifest model gets re-implemented
-there) → dedicated vector DB (new operational system). **Do not decide
-now** — `00-overview` gates M2 on `rag eval` exposing lexical misses,
-and that gate should also gate this decision.
+float32 ≈ 12–20GB of vectors; a scan per query is out.
+
+**Candidate comparison** (researched 2026-09-21):
+
+| Option | Deployment | Index types | Scale | Maturity | Fit with current arch |
+|---|---|---|---|---|---|
+| **sqlite-vec** | 60KB extension, zero deps | IVF, DiskANN | 1–5M viable | pre-v1, breaking changes expected | highest (same SQLite DB) |
+| **LanceDB** | embedded, Rust | IVF-PQ | 1M+ excellent | newer, stable | medium (separate file format) |
+| **Postgres+pgvector** | PG server required | HNSW, IVF-Flat | 1M+ excellent | mature | medium (add adapter to `src/storage/`, update RAG imports) |
+| **Dedicated vector DB** (Qdrant/Milvus) | independent service | HNSW, IVF, DiskANN | 1M+ excellent | mature | lowest (new ops system) |
+
+**sqlite-vec details**: Mozilla-sponsored, used by OpenClaw/Hermes agents.
+IVF and DiskANN indexes already supported (not brute-force only). Python API:
+`import sqlite_vec; sqlite_vec.load(conn)`. Risk: pre-v1 with known API
+instability (`01-design-rationale.md` §"Deviations" notes "2026 maintenance
+churn").
+
+**LanceDB details**: Columnar Lance format, disk-friendly (low RAM),
+IVF-PQ indexing. Embedded like sqlite-vec but introduces a separate storage
+format outside the SQLite ecosystem.
+
+**Decision logic** (apply when M2 gate triggers):
+
+```
+rag eval exposes lexical misses
+    │
+    ├─ Validate first: 5k-doc synthetic corpus with vector search实测
+    │
+    ├─ Primary factor: QPS (queries per second)
+    │   │
+    │   ├─ QPS < 100 (single-user, CLI tool)?
+    │   │   └─ YES → embedded solution (sqlite-vec or LanceDB)
+    │   │        │
+    │   │        ├─ Vector scale < 5M, accept pre-v1 risk?
+    │   │        │   └─ YES → sqlite-vec (smallest diff, same DB)
+    │   │        │        NO  → LanceDB (more stable, disk-friendly)
+    │   │
+    │   ├─ QPS 100–1000 (multi-user service)?
+    │   │   └─ single-node Qdrant/Milvus (connection pooling, query optimization)
+    │   │
+    │   └─ QPS > 1000 (high-concurrency SaaS)?
+    │       └─ distributed vector DB + replicas (load balancing, horizontal scaling)
+    │
+    ├─ Secondary factor: data volume
+    │   └─ Only matters within the QPS tier:
+    │       • < 5M vectors: any solution in the tier works
+    │       • 5M–50M: need proper indexing (IVF/DiskANN, not brute-force)
+    │       • > 50M: distributed sharding required
+    │
+    └─ Tertiary factor: operational complexity
+        └─ Dedicated vector DB only if team has ops capacity (Kubernetes, monitoring)
+```
+
+**Why QPS is the core factor** (not data volume):
+
+Data volume is the visible metric, but access pattern is the actual constraint.
+A 100k-doc corpus with 1000 concurrent users needs Qdrant; a 1M-doc corpus
+with 1 user needs sqlite-vec. The difference is connection management, query
+parallelization, and caching — problems embedded solutions don't solve because
+they don't exist at low QPS.
+
+Concrete boundaries (empirical):
+- **QPS < 100**: single SSD + OS page cache + IVF index → <50ms latency
+- **QPS 100–1000**: single node saturates CPU/network → need dedicated query engine
+- **QPS > 1000**: single node saturates → need distributed sharding
+
+This project: single-user CLI tool, peak <10 QPS. sqlite-vec's single
+connection + IVF index + OS page cache is sufficient. Dedicated vector DB
+would solve problems that don't exist here.
+
+**Recommended strategy**:
+
+1. **Short-term (M2 initial)**: sqlite-vec — smallest diff, zero ops, IVF/DiskANN
+   available. Mitigate pre-v1 risk with a `VectorStore` protocol abstraction
+   (`src/rag/vector_store.py`: `add(chunk_id, vector)`, `search(vector, k)`)
+   so the implementation can swap without touching the query engine.
+
+2. **Mid-term fallback**: LanceDB — if sqlite-vec proves unstable or
+   performance实测 at 5k-doc scale shows unacceptable QPS/P99 latency.
+   The `VectorStore` abstraction makes this a new implementation, not a
+   rewrite.
+
+3. **Not recommended for this project**: Postgres+pgvector — the `src/storage/`
+   layer already anticipates Postgres as a sibling adapter (`postgres.py`), so
+   migration cost is "add adapter + update RAG imports", not "rewrite". But
+   introducing a PG server just for vectors is over-engineering at <10 QPS;
+   only choose this if PG infrastructure already exists for other reasons.
+
+**Migration cost estimate** (if Postgres becomes necessary later):
+
+The `src/storage/` abstraction separates data access from business logic, so
+switching databases is a localized adapter change, not a rewrite:
+
+- **Changes** (~100 lines): add `src/storage/postgres.py` (`PostgresClient`),
+  add `src/storage/fts_postgres.py` (tsvector full-text search), update
+  `src/rag/store.py` and `src/rag/fts_path.py` imports.
+- **Unchanged** (~2000 lines): publish/manifest logic, chunking, assemble,
+  answer, all business rules.
+
+This is the payoff for the layered architecture: database selection is an
+adapter-layer decision, not a business-logic rewrite. The same pattern applies
+to any future database (MySQL, CockroachDB, etc.) — add a sibling module to
+`src/storage/`, update the imports in the consuming code.
+
+**Core principle**: Do not lock the storage before the corpus proves vectors
+are needed (`00-overview` M2 gate). sqlite-vec's minimal footprint makes it
+the safest "probe first" choice. The `VectorStore` abstraction is the exit
+ramp that keeps options open.
 
 ### 7. Trust/review does not scale to 100k humans
 

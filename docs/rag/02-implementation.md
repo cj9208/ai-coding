@@ -149,7 +149,7 @@ Six tables, not the five 01 sketches (`store._DDL`):
 | `documents` | gained `page_count`, `created_at` columns for status output |
 | `chunks` | PK is `(chunk_id, corpus_version)`, **not** `chunk_id` — content-addressed ids repeat across versions *by design*; versioned history is what rollback reads |
 | `chunks_fts` | `storage.FtsTable` over (title, body, section_path, keywords, summary), rowid-joined to `chunks`. Title = inferred title if enriched, else last segment of `section_path` |
-| `embeddings` | created, empty, never read in M1 — the M2 join key is the content-addressed `chunk_id` |
+| `embeddings` | created, empty, never read in M1 — the M2 join key is the content-addressed `chunk_id`. M2 vector storage decision: sqlite-vec is the probe-first candidate (IVF/DiskANN indexes, pre-v1 risk accepted); `VectorStore` protocol abstraction (`04-scaling` §6) keeps LanceDB/pgvector as exit ramps |
 | `snapshots` | as designed; `representations` is the authority on which paths `build_paths` runs |
 | `meta` | **new** — single-purpose key/value holding `active_version`; the pointer flip is what makes publish atomic |
 
@@ -223,13 +223,21 @@ Recorded so nobody re-derives the delta:
 
 ## Where the next plug-in lands
 
-M2's three-touch path, per the design — the code already has the slots:
+M2's four-touch path, per the design — the code already has the slots:
 
-1. `EmbeddingProvider` writes `embeddings` keyed on existing `chunk_id`
+1. **`VectorStore` protocol** (`src/rag/vector_store.py`) — the storage
+   abstraction that decouples the query engine from the vector backend.
+   Two methods: `add(chunk_id, vector)` and `search(vector, k) -> list[chunk_id]`.
+   The sqlite-vec implementation is the probe-first choice (`04-scaling` §6);
+   LanceDB or pgvector are swap-in replacements behind this protocol.
+
+2. `EmbeddingProvider` writes `embeddings` keyed on existing `chunk_id`
    (a backfill job diffs `content_hash` to skip unchanged chunks);
-2. flip `snapshots.representations["vector"]` to `ready@<model>` — nothing
+
+3. flip `snapshots.representations["vector"]` to `ready@<model>` — nothing
    else knows;
-3. one `DensePath` file + one line in `engine.build_paths`. `Candidate`,
+
+4. one `DensePath` file + one line in `engine.build_paths`. `Candidate`,
    `rrf_fuse`, `assemble`, `answer` do not change — that is the bet, and
    `rag eval` is what calls it.
 

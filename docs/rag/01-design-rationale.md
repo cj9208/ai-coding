@@ -145,7 +145,7 @@ generator is never asked to compensate for missing evidence (CH03_04's
 | --- | --- | --- |
 | MinerU parsing | our `ocr_backend` (PaddleOCR-VL) + human-proofread sidecar | the contract already normalizes it; the human gate is *stronger* than an automatic trust gate |
 | Elasticsearch | SQLite FTS5 + `fold_cjk` | CJK tokenizer gap is already solved and version-pinned here; playground scale |
-| Qdrant | none yet — `embeddings` table + protocol slot | sqlite-vec's 2026 maintenance churn says: don't marry an extension before the corpus proves vectors are needed |
+| Qdrant | none yet — `embeddings` table + protocol slot; M2 storage decision deferred to `04-scaling` §6 | sqlite-vec is the probe-first candidate (smallest diff, IVF/DiskANN available, pre-v1 risk accepted); `VectorStore` abstraction keeps LanceDB/pgvector as exit ramps. Gate: `rag eval` must expose lexical misses before any vector storage is provisioned |
 | BGE reranker | none yet — post-fusion slot in the engine | rerank earns its keep after hybrid; ordering M2=M3 would be guesswork |
 | Instructor/Guardrails | `llm_client.chat_json` + explicit checks | repo rule: one LLM door; CH03_04's own advice that grounding enforcement stays in application logic |
 | ACL enforcement | reserved columns only (`documents` has none; chunks inherit doc scope) | single-user repo; an ACL layer with no second user is the "wrapper that forwards parameters" the note set itself warns about |
