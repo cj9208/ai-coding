@@ -6,7 +6,7 @@ config. This dataclass holds only provider-connection fields.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
@@ -34,6 +34,7 @@ class LLMSettings:
     temperature: float = 0.3
     timeout: int = 120
     max_retries: int = 3
+    rate_limits: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls, **overrides) -> "LLMSettings":
@@ -51,6 +52,10 @@ class LLMSettings:
             else:
                 kwargs[attr] = raw
 
+        raw_limits = os.getenv("LLM_RATE_LIMITS")
+        if raw_limits:
+            kwargs["rate_limits"] = _parse_rate_limits(raw_limits)
+
         valid = set(cls.__annotations__)
         kwargs.update(
             {k: v for k, v in overrides.items() if v is not None and k in valid}
@@ -65,3 +70,24 @@ class LLMSettings:
                 "LLM_API_KEY is not set. Add it to the repo-root .env "
                 "(LLM_API_KEY=sk-...) or pass api_key= explicitly."
             )
+
+
+def _parse_rate_limits(raw: str) -> dict[str, int]:
+    """Parse ``model1:rpm1,model2:rpm2`` into a dict.
+
+    Example: ``LLM_RATE_LIMITS=deepseek-chat:10,deepseek-embedding:30``
+    """
+    result: dict[str, int] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        parts = entry.split(":")
+        if len(parts) != 2:
+            continue
+        model, rpm_str = parts
+        try:
+            result[model.strip()] = int(rpm_str.strip())
+        except ValueError:
+            continue
+    return result

@@ -43,8 +43,6 @@ class LLMClient:
     def __init__(
         self,
         settings: LLMSettings | None = None,
-        *,
-        rate_limits: dict[str, int] | None = None,
         **overrides: Any,
     ):
         self.settings = settings or LLMSettings.from_env(**overrides)
@@ -53,7 +51,7 @@ class LLMClient:
             base_url=self.settings.base_url,
             timeout=self.settings.timeout,
         )
-        self._limiter = RateLimiter(rate_limits)
+        self._limiter = RateLimiter(self.settings.rate_limits or None)
         self._limiter_started = False
 
     # -- public API ---------------------------------------------------------

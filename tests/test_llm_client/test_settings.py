@@ -36,3 +36,21 @@ def test_require_api_key_raises_only_when_missing(monkeypatch):
     except RuntimeError as exc:
         assert "LLM_API_KEY" in str(exc)
     LLMSettings(api_key="k").require_api_key()  # no raise
+
+
+def test_rate_limits_default_empty():
+    s = LLMSettings()
+    assert s.rate_limits == {}
+
+
+def test_rate_limits_from_env(monkeypatch):
+    monkeypatch.setenv("LLM_RATE_LIMITS", "deepseek-chat:10,deepseek-embedding:30")
+    s = LLMSettings.from_env()
+    assert s.rate_limits == {"deepseek-chat": 10, "deepseek-embedding": 30}
+
+
+def test_rate_limits_override_beats_env(monkeypatch):
+    monkeypatch.setenv("LLM_RATE_LIMITS", "deepseek-chat:10")
+    explicit = {"deepseek-chat": 20}
+    s = LLMSettings.from_env(rate_limits=explicit)
+    assert s.rate_limits == explicit

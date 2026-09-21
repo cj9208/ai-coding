@@ -27,6 +27,8 @@ Environment convention (read from `.env` automatically):
     LLM_TEMPERATURE  default: 0.3
     LLM_TIMEOUT      default: 120 (seconds)
     LLM_MAX_RETRIES  default: 3 attempts
+    LLM_RATE_LIMITS  per-model RPM cap, e.g. ``deepseek-chat:10,deepseek-embedding:30``
+                     (default: empty = no rate limiting)
 """
 
 from .client import LLMClient, get_client
