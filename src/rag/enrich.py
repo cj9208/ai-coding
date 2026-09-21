@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from llm_client import LLMClient, get_client
 
+from .contract import Chunk
 from .store import RagStore
 from .versions import PROMPT_VER, pipeline_fp
 
@@ -86,7 +87,7 @@ class LlmEnricher:
         self.prompt_ver = prompt_ver
         self.workers = workers
 
-    async def enrich(self, chunks: list[Any]) -> None:
+    async def enrich(self, chunks: list[Chunk]) -> None:
         client = self.client or get_client()
 
         candidates = [c for c in chunks[: self.max_chunks] if not c.is_parent]
@@ -110,7 +111,7 @@ class LlmEnricher:
 
         try:
 
-            async def _enrich_one(chunk: Any) -> tuple[str, _Insight]:
+            async def _enrich_one(chunk: Chunk) -> tuple[str, _Insight]:
                 raw = await client.chat_json(
                     f"Chunk text:\n{chunk.text[:_MAX_INPUT_CHARS]}",
                     system_prompt=_SYSTEM,
