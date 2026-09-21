@@ -13,7 +13,14 @@ the others, except where noted below.
 
 ## Environment & commands
 
-- Python >= 3.12, managed by **uv** (`uv.lock`, venv at `.venv/`).
+- Python >= 3.12, managed by **uv** (`pyproject.toml` declares dependencies;
+  the committed `uv.lock` records their exact resolution; venv at `.venv/`).
+- Change dependencies with `uv add` / `uv remove`, then commit the refreshed
+  `uv.lock`. On a clean machine, use `uv sync --locked` to install the recorded
+  environment without re-resolving versions.
+- OCR is optional: `uv sync --extra ocr` installs the CPU profile, and
+  `uv sync --extra ocr-gpu` installs the GPU profile. Paddle requires x86_64
+  (reported as `AMD64` on Windows); the GPU profile is limited to Windows and Linux.
 - The project is installed **editable with explicit top-level packages**
   (`[tool.hatch.build.targets.wheel] packages` in pyproject.toml). Imports are
   top-level (`from pdf_summarizer.config import ...`, never `src.pdf_summarizer`).

@@ -14,8 +14,8 @@ class PaddleOCRBackend(ExtractorBackend):
                 from paddleocr import PaddleOCR
             except ImportError:
                 raise ImportError(
-                    "paddleocr is required for OCR extraction. "
-                    "Install with: pip install paddleocr paddlepaddle"
+                    "paddleocr is required for OCR extraction. Install a profile with: "
+                    "uv sync --extra ocr (CPU) or uv sync --extra ocr-gpu (GPU)"
                 )
             self._ocr = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
         return self._ocr
@@ -28,8 +28,8 @@ class PaddleOCRBackend(ExtractorBackend):
             from pdf2image import convert_from_path
         except ImportError:
             raise ImportError(
-                "pdf2image is required for PaddleOCR extraction. "
-                "Install with: pip install pdf2image"
+                "pdf2image is required for PaddleOCR extraction. Install a profile with: "
+                "uv sync --extra ocr (CPU) or uv sync --extra ocr-gpu (GPU)"
             )
 
         ocr = self._get_ocr()
