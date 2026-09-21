@@ -10,7 +10,6 @@ repo-skills/
 *.pyc
 __pycache__/
 
-# machine-local helpers: update_skills.py syncs the ignored repo-skills/
-# trees; run_market_radar.sh just wraps the ai-market-radar entry point
+# machine-local helper; the repo-skills/ trees above are provisioned by
+# `skills sync` (src/skill_manager), so nothing else needs a script here
 /scripts/run_market_radar.sh
-/scripts/update_skills.py

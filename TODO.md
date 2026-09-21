@@ -4,6 +4,32 @@ Loose ends worth picking up, newest first. Anything here should be deleted once
 done rather than left as archaeology — the code and git history are the source
 of truth for completed work.
 
+## RAG incremental redesign — decisions owed (`docs/rag/05-incremental-design.md` §Open questions)
+
+- [ ] **P0 — Run the 5k-doc synthetic measurement** (prerequisite, not an open
+      question, but three of the four below decay into guesswork without it):
+      generate ~5k bundles, time `stage vs publish vs projection`, record DB
+      size and peak RSS; this is also the before/after baseline that justifies
+      the schema surgery in 04.
+- [ ] **P1 — Eval policy over a partially-enriched corpus**: while an enrich
+      backfill is mid-sweep (`partial@v3` in `representations`), does `rag eval`
+      score the lexical path against the new prompt version, pin the old
+      `ready@v2`, or score both and compare? eval is the designated referee for
+      every retrieval decision — including whether the next prompt version earns
+      corpus-wide status — so this must be answered *before* the first full
+      enrich sweep ships, and the golden set's next revision carries it.
+- [ ] **P2 — Publish trigger for the daily path**: fixed schedule vs backlog
+      threshold vs both. Only bites once production cron exists and ocr-review
+      starts landing corrections mid-day; decide when wiring the first cron,
+      not when writing `publish_diff`.
+- [ ] **P2 — `inferred` hydration at assembly**: join-time lookup (one extra
+      query per assemble) vs denormalized FTS-covering columns. Decide from the
+      P0 profile; until then implement the simple lookup — enrich is opt-in and
+      the lexical-only path doesn't touch this column.
+- [ ] **P3 — Snapshot retention: N full manifests vs delta chain**: the design
+      assumes N full manifests (daily publish × 100k manifest rows = years of
+      headroom); revisit only at first ops data showing the copy is a cost.
+
 ## Verification owed (blocked on this machine)
 
 - [ ] **Build the OCR runner image and run one real parse** (Docker Desktop,
@@ -24,6 +50,11 @@ of truth for completed work.
 
 ## Known gaps in what shipped
 
+- [ ] **Delete the leftover root `openspec-skills/` clone** (and its
+      `.gitignore` line). Skills now have one home — `repo-skills/` — but the
+      old clone could not be moved: a process (GitKraken?) held a handle, so
+      `repo-skills/openspec-skills/` was re-cloned from the same public remote
+      instead. The abandoned copy is harmless but now shadows the rule.
 - [ ] **ocr-review: one real mouse drag-to-add-block in a visible browser
       window.** Everything else (pixel alignment, corrected/rejected/added
       blocks, save/409, export) was verified end-to-end, but the headless
