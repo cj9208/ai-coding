@@ -68,7 +68,7 @@ def test_weak_evidence_floor_abstains(built):
     weak = Candidate(
         chunk_id=child.chunk_id, scores={"fts": 1e-6}, ranks={"fts": 1, "rrf": 1}
     )
-    pack = assemble(store.client, version, "q", [weak], k=3, path_meta=[])
+    pack = assemble(store.client, "q", [weak], k=3, path_meta=[])
     assert pack.insufficient
     assert pack.chunks  # kept visible for --retrieve-only diagnosis
 

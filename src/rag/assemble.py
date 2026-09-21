@@ -24,21 +24,17 @@ _MAX_PACK_CHUNKS = 12
 _WEAK_EVIDENCE_FLOOR = 1e-3
 
 
-def _fetch_by_ids(
-    client, version: int, ids: list[str]
-) -> dict[str, Chunk]:  # noqa: ANN001
+def _fetch_by_ids(client, ids: list[str]) -> dict[str, Chunk]:  # noqa: ANN001
     if not ids:
         return {}
     placeholders = ", ".join(f":i{n}" for n in range(len(ids)))
     params: dict = {f"i{n}": cid for n, cid in enumerate(ids)}
-    params["v"] = version
     with client.session() as db:
         rows = (
             db.execute(
                 text(
                     # placeholders generated, ids are bound params
-                    f"SELECT * FROM chunks WHERE corpus_version = :v "  # nosec B608
-                    f"AND chunk_id IN ({placeholders})"
+                    f"SELECT * FROM chunks WHERE chunk_id IN ({placeholders})"  # nosec B608
                 ),
                 params,
             )
@@ -50,7 +46,6 @@ def _fetch_by_ids(
 
 def assemble(
     client,  # noqa: ANN001 - SqliteClient
-    version: int,
     query: str,
     fused: list[Candidate],
     k: int,
@@ -59,7 +54,7 @@ def assemble(
     expand_parents: bool = True,
 ) -> EvidencePack:
     picked = [c for c in fused if "rrf" in c.ranks][:k]
-    children = _fetch_by_ids(client, version, [c.chunk_id for c in picked])
+    children = _fetch_by_ids(client, [c.chunk_id for c in picked])
     pack_chunks = [children[c.chunk_id] for c in picked if c.chunk_id in children]
 
     strength: dict = {
@@ -91,7 +86,7 @@ def assemble(
     parents: list[Chunk] = []
     if expand_parents:
         parent_ids = [c.parent_chunk_id for c in pack_chunks if c.parent_chunk_id]
-        fetched = _fetch_by_ids(client, version, parent_ids)
+        fetched = _fetch_by_ids(client, parent_ids)
         seen: set[str] = set()
         for pid in parent_ids:
             if pid in fetched and pid not in seen:

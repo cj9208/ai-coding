@@ -119,8 +119,10 @@ class Chunk(BaseModel):
     from source text — CH03_02's authoritative-vs-inferred separation."""
 
     @staticmethod
-    def chunk_id_for(doc_id: str, section_path: str, block_keys: list[str]) -> str:
-        return sha256_hex("|".join([doc_id, section_path, *block_keys]), length=12)
+    def chunk_id_for(
+        doc_id: str, section_path: str, block_keys: list[str], *, fp: str = ""
+    ) -> str:
+        return sha256_hex("|".join([fp, doc_id, section_path, *block_keys]), length=12)
 
     @staticmethod
     def content_hash_for(text: str) -> str:

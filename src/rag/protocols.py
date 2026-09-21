@@ -36,7 +36,7 @@ class Acquirer(Protocol):
 class ChunkStrategy(Protocol):
     """Split one canonical document into retrieval units."""
 
-    def split(self, doc: CanonicalDoc) -> list[Chunk]: ...
+    def split(self, doc: CanonicalDoc, *, fp: str = "") -> list[Chunk]: ...
 
 
 class QueryShaper(Protocol):

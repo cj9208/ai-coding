@@ -30,7 +30,8 @@ _SQL = (
     f'bm25(chunks_fts, {", ".join(str(w) for w in _WEIGHTS)}) AS rank_score '
     "FROM chunks_fts "
     "JOIN chunks c ON c.rowid = chunks_fts.rowid "
-    "WHERE chunks_fts MATCH :m AND c.corpus_version = :v AND c.is_parent = 0 "
+    "JOIN snapshot_docs sd ON sd.doc_id = c.doc_id AND sd.pipeline_fp = c.pipeline_fp "
+    "WHERE chunks_fts MATCH :m AND sd.corpus_version = :v AND c.is_parent = 0 "
     "ORDER BY rank_score "
     "LIMIT :k"
 )

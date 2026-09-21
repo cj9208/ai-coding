@@ -58,7 +58,6 @@ def retrieve(
             fused = rrf_fuse([(name, out.candidates) for name, out in outcomes])
             pack = assemble(
                 store.client,
-                version,
                 question,
                 fused,
                 k,

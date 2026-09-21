@@ -10,6 +10,18 @@ why designed this way        what actually shipped        how to run it
 docs/rag/01-*.md  ◄───────── docs/rag/02-implementation ─► docs/rag/03-usage
 (design rationale)             (module map, constants,      (full CLI reference,
                                 deviations from 01)          golden set, traces)
+
+                          where it breaks at 100k PDFs
+                          docs/rag/04-scaling.md
+                          (investigation: publish must become
+                           an incremental manifest swap, not a
+                           full rebuild — nothing measured yet)
+                                     │
+                                     ▼
+                          the redesign, concretely
+                          docs/rag/05-incremental-design.md
+                          (manifest + fingerprint schema, publish
+                           diff, CLI shape, migration, test plan)
 ```
 
 ## The document set
@@ -19,6 +31,8 @@ docs/rag/01-*.md  ◄───────── docs/rag/02-implementation ─�
 | `01-design-rationale.md` | Why contracts are the spine, why plugins with one implementation, why lexical-only is a legitimate M1, deviations from the blog's reference stack | You want to change the architecture and need the load-bearing arguments |
 | `02-implementation.md` | The 19 modules of `src/rag` and what each really does, every tuned constant, where the shipped code diverges from the design text | You are reading or modifying `src/rag` |
 | `03-usage.md` | Every `rag` subcommand and flag, golden-file format, trace records, exit codes, library entry points | You want to build a corpus, ask questions, or measure |
+| `04-scaling.md` | What breaks first at 100k PDFs / 1k per day, why publish must become a manifest swap, what to measure before doing surgery | You are about to grow the corpus past playground scale |
+| `05-incremental-design.md` | The v2 schema (manifest + fingerprint), the bounded publish transaction, ingest/publish/retract/gc CLI, migration and test plan | You are implementing (or reviewing) the incremental redesign |
 
 Start with `01` if you have never seen the design; start with `03` if you
 just want to run it; `02` is the bridge — it also records the deviations, so
@@ -33,6 +47,13 @@ an agent trusting `01` alone will not be surprised.
   documented in `02-implementation.md` §"Where the next plug-in lands".
 - The corpus itself is not chosen yet — which is *why* the design looks the
   way it does (see `01`).
+- **Scaling investigated (2026-09-21, `04-scaling.md`)**: at 100k PDFs the
+  full-rebuild publish is the core contradiction. Agreed direction:
+  version-as-manifest plus a pipeline fingerprint in `chunk_id` —
+  incremental is the only path, full refresh is its degenerate case.
+  Now specced concretely in `05-incremental-design.md` (design of
+  record, pre-implementation). All of 04's numbers remain estimates —
+  the 5k-doc measurement run has not happened yet.
 
 ## Data at a glance
 

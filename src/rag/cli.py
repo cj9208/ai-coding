@@ -1,13 +1,17 @@
 """``rag`` CLI — the one entry point for the knowledge pipeline.
 
-    rag build --inbox data/ocr_backend/out [--enrich]
+    rag build --inbox data/ocr_backend/out [--enrich]   # ingest + publish
+    rag ingest [--inbox DIR] [--limit N] [--enrich]     # stage new/changed docs
+    rag publish                                          # diff transaction
+    rag retract <doc_id>                                 # mark for removal
+    rag gc [--keep N]                                    # prune old snapshots
     rag status
     rag query "年假超过几天需要审批？" [-k 5] [--retrieve-only]
     rag eval tests/golden/rag_sample.jsonl
     rag traces [-n 10] [FILE]
 
-Any of build/query/eval accepts ``--trace``: the run is recorded as one
-JSONL span file under ``<data-dir>/traces/`` (see ``rag.tracing``), and
+Any of build/ingest/query/eval accepts ``--trace``: the run is recorded as
+one JSONL span file under ``<data-dir>/traces/`` (see ``rag.tracing``), and
 ``traces`` lists / renders those records.
 
 ``build`` is offline and deterministic (LLM only with ``--enrich``);
@@ -30,7 +34,7 @@ from .answer import generate
 from .contract import Outcome
 from .engine import retrieve
 from .evaluation import evaluate, load_cases
-from .pipeline import build
+from .pipeline import build, ingest, publish
 from .store import RagStore
 from .tracing import Tracer, load_trace, render_tree
 
@@ -58,6 +62,38 @@ def _parser() -> argparse.ArgumentParser:
         help="LLM-annotate chunks (titles/keywords/summaries) before indexing",
     )
 
+    p_ingest = sub.add_parser("ingest", help="stage new/changed docs from inbox")
+    p_ingest.add_argument(
+        "--inbox",
+        type=Path,
+        default=default_data_dir("ocr_backend") / "out",
+        help="directory of *.ocr.json bundles from `ocr-backend parse`",
+    )
+    p_ingest.add_argument(
+        "--enrich",
+        action="store_true",
+        help="LLM-annotate chunks (titles/keywords/summaries) before indexing",
+    )
+    p_ingest.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="stop after N bundles (0 = no limit)",
+    )
+
+    sub.add_parser("publish", help="run the diff transaction (staged -> active)")
+
+    p_retract = sub.add_parser("retract", help="mark a doc for removal at next publish")
+    p_retract.add_argument("doc_id", help="document id to retract")
+
+    p_gc = sub.add_parser("gc", help="prune old snapshots and orphaned chunks")
+    p_gc.add_argument(
+        "--keep",
+        type=int,
+        default=3,
+        help="retain the N most recent snapshots (default: 3)",
+    )
+
     sub.add_parser("status", help="documents, snapshots, active version")
 
     p_query = sub.add_parser("query", help="online: retrieve (+ grounded answer)")
@@ -81,7 +117,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     p_traces.add_argument("-n", type=int, default=10, help="how many to list")
 
-    for sp in (p_build, p_query, p_eval):
+    for sp in (p_build, p_ingest, p_query, p_eval):
         sp.add_argument(
             "--trace",
             action="store_true",
@@ -109,6 +145,44 @@ def _cmd_build(args: argparse.Namespace) -> int:
         _report_trace(tracer.close())
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if not report["errors"] else 1
+
+
+def _cmd_ingest(args: argparse.Namespace) -> int:
+    tracer = _tracer(args)
+    try:
+        report = ingest(
+            args.inbox,
+            args.data_dir,
+            enrich=args.enrich,
+            limit=args.limit,
+            tracer=tracer,
+        )
+    finally:
+        _report_trace(tracer.close())
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if not report["errors"] else 1
+
+
+def _cmd_publish(args: argparse.Namespace) -> int:
+    report = publish(args.data_dir)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_retract(args: argparse.Namespace) -> int:
+    store = RagStore(args.data_dir / "kb.db")
+    store.retract(args.doc_id)
+    print(f"retracted: {args.doc_id}")
+    store.dispose()
+    return 0
+
+
+def _cmd_gc(args: argparse.Namespace) -> int:
+    store = RagStore(args.data_dir / "kb.db")
+    result = store.gc(keep=args.keep)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    store.dispose()
+    return 0
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -209,6 +283,10 @@ def _cmd_traces(args: argparse.Namespace) -> int:
 
 _COMMANDS = {
     "build": _cmd_build,
+    "ingest": _cmd_ingest,
+    "publish": _cmd_publish,
+    "retract": _cmd_retract,
+    "gc": _cmd_gc,
     "status": _cmd_status,
     "query": _cmd_query,
     "eval": _cmd_eval,

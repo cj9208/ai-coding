@@ -41,6 +41,7 @@ def _mk_chunk(
     chunk_type: ChunkType,
     blocks: list[tuple[int, OcrBlock]],
     trust_level: str,
+    fp: str = "",
 ) -> Chunk:
     keys = [block_key(page, b.id) for page, b in blocks]
     body = "\n\n".join(b.content.strip() for _, b in blocks)
@@ -50,7 +51,7 @@ def _mk_chunk(
         else None
     )
     return Chunk(
-        chunk_id=Chunk.chunk_id_for(doc_id, section_path, keys),
+        chunk_id=Chunk.chunk_id_for(doc_id, section_path, keys, fp=fp),
         doc_id=doc_id,
         chunk_type=chunk_type,
         is_parent=chunk_type is ChunkType.section,
@@ -84,6 +85,7 @@ def _flush_run(
     run: list[tuple[int, OcrBlock]],
     run_type: ChunkType,
     children: list[Chunk],
+    fp: str = "",
 ) -> None:
     if not run:
         return
@@ -96,26 +98,32 @@ def _flush_run(
             item_len = len(item[1].content)
             if window and size + item_len > CHILD_CHAR_LIMIT:
                 children.append(
-                    _mk_chunk(doc.doc_id, section_path, run_type, window, trust)
+                    _mk_chunk(doc.doc_id, section_path, run_type, window, trust, fp=fp)
                 )
                 window, size = [], 0
             window.append(item)
             size += item_len
         if window:
             children.append(
-                _mk_chunk(doc.doc_id, section_path, run_type, window, trust)
+                _mk_chunk(doc.doc_id, section_path, run_type, window, trust, fp=fp)
             )
     else:
-        children.append(_mk_chunk(doc.doc_id, section_path, run_type, run, trust))
+        children.append(
+            _mk_chunk(doc.doc_id, section_path, run_type, run, trust, fp=fp)
+        )
 
 
 def _mk_parent(
-    doc_id: str, section_path: str, children: list[Chunk], trust_level: str
+    doc_id: str,
+    section_path: str,
+    children: list[Chunk],
+    trust_level: str,
+    fp: str = "",
 ) -> Chunk:
     body = "\n\n".join(c.text for c in children)
     keys = [k for c in children for k in c.block_keys]
     return Chunk(
-        chunk_id=Chunk.chunk_id_for(doc_id, section_path, keys),
+        chunk_id=Chunk.chunk_id_for(doc_id, section_path, keys, fp=fp),
         doc_id=doc_id,
         chunk_type=ChunkType.section,
         is_parent=True,
@@ -138,7 +146,7 @@ class StructureAwareChunker:
 
     name = "structure_aware"
 
-    def split(self, doc: CanonicalDoc) -> list[Chunk]:
+    def split(self, doc: CanonicalDoc, *, fp: str = "") -> list[Chunk]:
         chunks: list[Chunk] = []
         for section_path, blocks in _group_by_section(doc).items():
             children: list[Chunk] = []
@@ -148,7 +156,12 @@ class StructureAwareChunker:
                 btype = _type_of(block.kind)
                 if btype in _ATOMIC:
                     _flush_run(
-                        doc, section_path, run, run_type or ChunkType.prose, children
+                        doc,
+                        section_path,
+                        run,
+                        run_type or ChunkType.prose,
+                        children,
+                        fp=fp,
                     )
                     run, run_type = [], None
                     children.append(
@@ -158,6 +171,7 @@ class StructureAwareChunker:
                             btype,
                             [(page_index, block)],
                             doc.trust.publish_decision.value,
+                            fp=fp,
                         )
                     )
                     continue
@@ -169,6 +183,7 @@ class StructureAwareChunker:
                             run,
                             run_type or ChunkType.prose,
                             children,
+                            fp=fp,
                         )
                         run, run_type = [], ChunkType.list
                     run.append((page_index, block))
@@ -176,14 +191,21 @@ class StructureAwareChunker:
                 # prose-ish: keep merging until the window limit hits
                 if run_type is not ChunkType.prose:
                     _flush_run(
-                        doc, section_path, run, run_type or ChunkType.prose, children
+                        doc,
+                        section_path,
+                        run,
+                        run_type or ChunkType.prose,
+                        children,
+                        fp=fp,
                     )
                     run, run_type = [], ChunkType.prose
                 run.append((page_index, block))
                 if sum(len(b.content) for _, b in run) >= CHILD_CHAR_LIMIT:
-                    _flush_run(doc, section_path, run, ChunkType.prose, children)
+                    _flush_run(doc, section_path, run, ChunkType.prose, children, fp=fp)
                     run = []
-            _flush_run(doc, section_path, run, run_type or ChunkType.prose, children)
+            _flush_run(
+                doc, section_path, run, run_type or ChunkType.prose, children, fp=fp
+            )
 
             if not children:
                 continue
@@ -193,6 +215,7 @@ class StructureAwareChunker:
                     section_path,
                     children,
                     doc.trust.publish_decision.value,
+                    fp=fp,
                 )
                 chunks.append(parent)
                 children = [

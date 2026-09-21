@@ -181,6 +181,22 @@ shaping; wrong context size → ChunkStrategy).
 - **M4**: ground `rag query` behind a CH01-style intention gate when the
   orchestration capability is built.
 
+## Deferred decisions (from incremental design)
+
+The incremental design (`05-incremental-design.md`) resolved four open
+questions; the decisions affect this document's future milestones:
+
+- **Eval waits for batch completion.** `rag eval` runs after ingest+publish
+  finish, not over partial state — partial eval adds noise without value.
+- **Publish trigger is deferred.** Daily publish can be cron-scheduled or
+  event-driven (monitoring inbox for new data); not a current priority.
+- **Inferred hydration is config-controlled.** Which retrieval paths are
+  enabled and how many resources they consume is a config + hardware
+  question, not a design-time decision.
+- **Snapshot retention uses full manifests.** Keep N full snapshots; delta
+  chain is deferred until ops data shows the need (years of headroom at
+  current scale).
+
 ## Run it
 
 Moved to `03-usage.md` (the full CLI reference). Tests:

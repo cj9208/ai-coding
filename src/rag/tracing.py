@@ -205,9 +205,9 @@ class TracedChunker:
         self.inner = inner
         self.tracer = tracer
 
-    def split(self, doc: CanonicalDoc) -> list[Chunk]:
+    def split(self, doc: CanonicalDoc, *, fp: str = "") -> list[Chunk]:
         with self.tracer.span("rag.chunk", doc_id=doc.doc_id) as sp:
-            chunks = self.inner.split(doc)
+            chunks = self.inner.split(doc, fp=fp)
             sp.set(
                 n_chunks=len(chunks),
                 n_parents=sum(1 for c in chunks if c.is_parent),

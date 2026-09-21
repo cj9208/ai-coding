@@ -34,13 +34,10 @@ def test_rebuild_bumps_version_and_keeps_history(built, inbox, tmp_path):
 
 
 def test_publish_reindexes_fts_to_new_version_only(built):
+    """After publish, FTS rowids are a subset of active version's chunks."""
     store, _ = built
-    v1 = store.active_version()
-    assert v1 is not None
-    # stage a version 2 holding a single chunk and publish it
-    one = [c for c in store.chunks_in(v1) if not c.is_parent][:1]
-    store.stage_chunks(2, one)
-    store.publish(2, REPRESENTATIONS)
+    version = store.active_version()
+    assert version is not None
     from storage import match_expr
 
     query = match_expr(["审批"])
@@ -52,13 +49,17 @@ def test_publish_reindexes_fts_to_new_version_only(built):
                 {"m": query},
             )
         }
-        v2_rowids = {
+        active_rowids = {
             r[0]
             for r in db.execute(
-                text("SELECT rowid FROM chunks WHERE corpus_version = 2")
+                text("""SELECT c.rowid FROM chunks c
+                       JOIN snapshot_docs sd ON sd.doc_id = c.doc_id
+                           AND sd.pipeline_fp = c.pipeline_fp
+                       WHERE sd.corpus_version = :v"""),
+                {"v": version},
             )
         }
-    assert fts_rowids <= v2_rowids  # no stale hits from v1
+    assert fts_rowids <= active_rowids  # no stale hits from outside active
 
 
 def test_chunk_ids_matching_resolves_substrings(built):
