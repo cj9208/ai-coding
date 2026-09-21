@@ -234,6 +234,10 @@ class RagStore:
         """Incremental publish: copy base manifest ± staged/retracted, diff FTS."""
         fp = pipeline_fp()
         with self.client.session() as db:
+            # BEGIN IMMEDIATE acquires a write lock up front, preventing two
+            # concurrent publishes from reading the same active_version and
+            # computing the same v_new.
+            db.execute(text("BEGIN IMMEDIATE"))
             active = self._active_in(db)
             v_new = (active or 0) + 1
 
