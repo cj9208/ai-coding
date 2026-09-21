@@ -9,4 +9,4 @@ paddleocr-vl-1.6
 
 .env
 *.pyc
-uv.lock
+__pycache__/
