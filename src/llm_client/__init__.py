@@ -30,6 +30,7 @@ Environment convention (read from `.env` automatically):
 """
 
 from .client import LLMClient, get_client
+from .rate_limit import RateLimiter, TokenBucket
 from .settings import LLMSettings
 
-__all__ = ["LLMClient", "LLMSettings", "get_client"]
+__all__ = ["LLMClient", "LLMSettings", "RateLimiter", "TokenBucket", "get_client"]

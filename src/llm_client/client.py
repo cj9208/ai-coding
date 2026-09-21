@@ -29,6 +29,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from .rate_limit import RateLimiter
 from .settings import LLMSettings
 
 logger = logging.getLogger(__name__)
@@ -39,13 +40,21 @@ Message = dict[str, str]
 
 
 class LLMClient:
-    def __init__(self, settings: LLMSettings | None = None, **overrides: Any):
+    def __init__(
+        self,
+        settings: LLMSettings | None = None,
+        *,
+        rate_limits: dict[str, int] | None = None,
+        **overrides: Any,
+    ):
         self.settings = settings or LLMSettings.from_env(**overrides)
         self._client = AsyncOpenAI(
             api_key=self.settings.api_key,
             base_url=self.settings.base_url,
             timeout=self.settings.timeout,
         )
+        self._limiter = RateLimiter(rate_limits)
+        self._limiter_started = False
 
     # -- public API ---------------------------------------------------------
 
@@ -123,6 +132,8 @@ class LLMClient:
                 self.settings.temperature if temperature is None else temperature
             ),
         }
+        await self._ensure_limiter_started()
+        await self._limiter.acquire(params["model"])
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self.settings.max_retries),
             wait=wait_exponential(multiplier=1, min=1, max=30),
@@ -132,6 +143,16 @@ class LLMClient:
             with attempt:
                 response = await self._client.chat.completions.create(**params)
         return response.choices[0].message.content or ""
+
+    async def _ensure_limiter_started(self) -> None:
+        if not self._limiter_started and self._limiter.configured_models:
+            await self._limiter.start()
+            self._limiter_started = True
+
+    async def close(self) -> None:
+        """Stop the rate limiter and close the underlying HTTP client."""
+        await self._limiter.stop()
+        await self._client.close()
 
 
 def _to_messages(prompt: str, system_prompt: str) -> list[Message]:
