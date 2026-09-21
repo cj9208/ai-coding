@@ -88,6 +88,11 @@ class Span:
         }
 
 
+#: pre-allocated no-op span yielded by disabled tracers — avoids per-call
+#: allocation when tracing is off (the common case outside debug runs)
+_NO_OP_SPAN = Span(trace_id="", span_id="0", parent_span_id=None, name="", start=0.0)
+
+
 class Tracer:
     """Collects one run's spans and exports them as JSONL on ``close()``.
 
@@ -121,9 +126,7 @@ class Tracer:
     @contextmanager
     def span(self, name: str, **attributes: Any) -> Iterator[Span]:
         if not self.enabled:
-            yield Span(
-                self.trace_id, "0", None, name, time.time(), attributes=dict(attributes)
-            )
+            yield _NO_OP_SPAN
             return
         parent = _CURRENT.get()
         sp = Span(
