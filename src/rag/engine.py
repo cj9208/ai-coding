@@ -54,7 +54,8 @@ def retrieve(
         elif not (paths := build_paths(store, version)):
             pack = empty_pack(question, "active snapshot has no live representations")
         else:
-            cache_key = sha256_hex(f"{question}:{k}")
+            shaped = shaped or TracedShaper(LexicalShaper(), tracer).shape(question)
+            cache_key = sha256_hex(f"{question}:{k}:{','.join(shaped.tokens)}")
             cache_tag = str(version)
             if cache is not None:
                 cached = cache.get(cache_key, tag=cache_tag)
@@ -67,7 +68,6 @@ def retrieve(
                         insufficient=pack.insufficient,
                     )
                     return pack
-            shaped = shaped or TracedShaper(LexicalShaper(), tracer).shape(question)
             outcomes = [
                 (p.name, TracedPath(p, tracer).search(shaped, k * 2)) for p in paths
             ]

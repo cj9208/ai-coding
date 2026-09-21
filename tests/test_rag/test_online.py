@@ -109,7 +109,8 @@ def test_cache_miss_on_version_change(built, tmp_path: Path):
         # Simulate a version bump by directly writing a cache entry with old tag
         from storage import sha256_hex
 
-        key = sha256_hex("年假审批:3")
+        shaped = LexicalShaper().shape("年假审批")
+        key = sha256_hex(f"年假审批:3:{','.join(shaped.tokens)}")
         cache.put(
             key,
             '{"query":"年假审批","chunks":[],"strength":{},"insufficient":true,"notes":["stale"]}',
