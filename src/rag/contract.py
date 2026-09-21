@@ -41,10 +41,18 @@ class PublishDecision(StrEnum):
     fail = "fail"
 
 
+class SourceKind(StrEnum):
+    """Document origin type — mirrors ocr_backend's Literal but as an enum
+    so rag code branches on enum members, not raw strings."""
+
+    pdf = "pdf"
+    image = "image"
+
+
 class SourceInfo(BaseModel):
     """Lineage: what produced this document and whether a human vetted it."""
 
-    kind: str
+    kind: SourceKind
     path: str
     sha256: str
     extractor: str
