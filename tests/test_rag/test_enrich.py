@@ -203,3 +203,40 @@ def test_mixed_enrich_state(built) -> None:
 def _raw_session(store: RagStore):
     """Return a session handle for _load_inferred (it takes a db param)."""
     return store.client.session().__enter__()
+
+
+class ConcurrentFakeClient:
+    """Fake client that tracks peak concurrency."""
+
+    def __init__(self, payload: dict):
+        self.payload = payload
+        self.calls = 0
+        self.running = 0
+        self.peak = 0
+
+    async def chat_json(
+        self, prompt, system_prompt="", *, schema=None, model=None, temperature=None
+    ):
+        self.calls += 1
+        self.running += 1
+        self.peak = max(self.peak, self.running)
+        await asyncio.sleep(0.05)
+        self.running -= 1
+        if schema is not None:
+            return schema.model_validate(self.payload)
+        return self.payload
+
+
+def test_enricher_runs_concurrently(store: RagStore) -> None:
+    """Multiple chunks are processed in parallel, not serial."""
+    chunks = [_chunk(f"c{i}", text=f"text {i}") for i in range(6)]
+    client = ConcurrentFakeClient({"title": "t", "keywords": ["k"], "summary": "s"})
+    enricher = LlmEnricher(
+        client=client,  # type: ignore[arg-type]
+        store=store,
+        workers=4,
+    )
+    asyncio.run(enricher.enrich(chunks))
+
+    assert client.calls == 6
+    assert client.peak > 1  # actually concurrent, not serial

@@ -89,6 +89,12 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="prompt version tag (default: versions.PROMPT_VER)",
     )
+    p_enrich.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="concurrent LLM calls (default: 4)",
+    )
 
     p_retract = sub.add_parser("retract", help="mark a doc for removal at next publish")
     p_retract.add_argument("doc_id", help="document id to retract")
@@ -184,6 +190,7 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
         args.data_dir,
         limit=args.limit,
         prompt_ver=prompt_ver,
+        workers=args.workers,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 1 if report["errors"] else 0
