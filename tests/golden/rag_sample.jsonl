@@ -1,0 +1,3 @@
+{"case_id": "leave-approval-threshold", "question": "年假超过几天需要部门经理审批？", "expected_substrings": ["部门经理审批"], "rationale": "the approval-threshold sentence must surface in top-k (CH04 retrieval row: hit-rate)"}
+{"case_id": "leave-approval-flow", "question": "年假审批流程是什么？", "expected_substrings": ["审批"], "rationale": "section 1.1 审批流程 covers this; substring pins the section body, not an id"}
+{"case_id": "expense-cap", "question": "报销额度上限是多少？", "expected_substrings": [], "rationale": "abstention test: no token of the question appears anywhere in the corpus, so the pack must come back insufficient without an LLM call"}
