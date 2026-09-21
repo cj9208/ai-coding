@@ -22,6 +22,12 @@ docs/rag/01-*.md  ◄───────── docs/rag/02-implementation ─�
                           docs/rag/05-incremental-design.md
                           (manifest + fingerprint schema, publish
                            diff, CLI shape, migration, test plan)
+
+                          trust at 100k docs
+                          docs/rag/06-scalable-validation.md
+                          (four-layer validation: expanded deterministic
+                           checks [shipped], perplexity scoring, sampled
+                           QC, feedback loop — Phase 1 implemented)
 ```
 
 ## The document set
@@ -33,6 +39,7 @@ docs/rag/01-*.md  ◄───────── docs/rag/02-implementation ─�
 | `03-usage.md` | Every `rag` subcommand and flag, golden-file format, trace records, exit codes, library entry points | You want to build a corpus, ask questions, or measure |
 | `04-scaling.md` | What breaks first at 100k PDFs / 1k per day, why publish must become a manifest swap, what to measure before doing surgery | You are about to grow the corpus past playground scale |
 | `05-incremental-design.md` | The v2 schema (manifest + fingerprint), the bounded publish transaction, ingest/publish/retract/gc CLI, migration and test plan | You are implementing (or reviewing) the incremental redesign |
+| `06-scalable-validation.md` | Four-layer validation architecture (deterministic checks, perplexity, sampled QC, feedback loop), Phase 1 implementation details | You are extending the trust model or adding new quality checks |
 
 Start with `01` if you have never seen the design; start with `03` if you
 just want to run it; `02` is the bridge — it also records the deviations, so
@@ -54,6 +61,10 @@ an agent trusting `01` alone will not be surprised.
   Now specced concretely in `05-incremental-design.md` (design of
   record, pre-implementation). All of 04's numbers remain estimates —
   the 5k-doc measurement run has not happened yet.
+- **Scalable validation designed (2026-09-21, `06-scalable-validation.md`)**:
+  four-layer trust architecture. Phase 1 shipped — expanded deterministic
+  checks (7 new, zero cost). Phases 2-4 (perplexity scoring, sampled QC,
+  feedback loop) are design-only.
 
 ## Data at a glance
 
