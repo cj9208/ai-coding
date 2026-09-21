@@ -34,7 +34,9 @@ the others, except where noted below.
 - Run tests: `uv run pytest`. Async tests work via `asyncio_mode = "auto"`
   (no markers needed).
 - CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`,
-  `research-agent`, `ocr-backend`, `ocr-review`, `rag` (`[project.scripts]`).
+  `research-agent`, `ocr-backend`, `ocr-review`, `rag`, `skills`
+  (`[project.scripts]`). `skills` is the one owner of vendored AI skills —
+  `sync` / `list` / `outdated` / `add` (see "AI skills & specs").
   `ocr-backend` has three subcommands: `download <model>` (provisions a
   snapshot), `parse <file> --out <dir>` (one-shot OCR runner entry point —
   writes the `OcrDocument` JSON + markdown **and copies the source file
@@ -77,10 +79,11 @@ are already there). Env convention lives only in
 | `src/ai_market_radar/` | scans OpenAI/Anthropic/Copilot **news sources** into SQLite, digest of new items. "OpenAI" here is a watched entity, not a dependency. Deterministic parsing on purpose — no LLM | no |
 | `src/file_manager/` | FastAPI file manager, metadata-first search (FTS5) | no |
 | `src/research_agent/` | research & recommendation agent — **MVP implemented & live-verified 2026-09-20** (`research-agent new/answer/status/report`); design docs in `docs/research-recommendation-agent/` (read `00-overview.md` first, `06-usage-guide.md` to run it), module layout mirrors the docs (orchestrator/research/clarifying/recommendation/contracts/persistence — the storage subpackage was renamed to dodge the top-level `storage` clash) | yes, via `llm_client` |
-| `src/rag/` | knowledge pipeline over OCR output: `rag build/query/eval/status/traces` — M1 (lexical-only, vector-free by design) implemented & live-verified 2026-09-21; docs in `docs/rag/` (read `00-overview.md` first — it maps rationale / implementation / usage to the three volumes), sample golden file `tests/golden/rag_sample.jsonl` | yes, query-time + opt-in `build --enrich`, via `llm_client` |
+| `src/rag/` | knowledge pipeline over OCR output: `rag build/query/eval/status/traces/enrich` — M1 (lexical-only, vector-free by design) implemented & live-verified 2026-09-21; docs in `docs/rag/` (read `00-overview.md` first — it maps rationale / implementation / usage to the three volumes), sample golden file `tests/golden/rag_sample.jsonl`. Enrich is an independent background step (`rag enrich`), not part of build — it persists LLM annotations to the `inferred` table per chunk, so different chunks can have different enrich states | yes, query-time + `rag enrich` (independent), via `llm_client` |
+| `src/skill_manager/` | vendored AI skills, end to end: `sources.UPSTREAMS` declares each repository pinned to a commit sha (mirrors `ocr_backend.models`), `vendor.py` provisions the gitignored clones under `repo-skills/`, `install.py` rebuilds every generated install dir (`.opencode/skills/`) as a full view of the declaration — pruning names no longer declared, `cli.py` is the `skills` entry point. No LLM, no DB, no network beyond `git clone`/`fetch` | no |
 | `src/coding/`, `src/modules/` | standalone algorithm exercises and small one-off scripts (e.g. `analyze_birth.py`, `analyze_package_size.py` — root-level scripts were moved into `modules/` to keep `src/` clean), plus `seating_app.py`: a Streamlit classroom-seating app (`streamlit run src/modules/seating_app.py`, uploads its own Excel) — it is why streamlit/pandas/openpyxl/xlsxwriter sit in the core deps | no |
 | `scripts/` | kept-for-the-record verification scripts, one per investigation (`verify_paddle_vl_16.py` is the evidence trail behind `docs/ocr-backend-design.md` §5.3). Machine-local helpers here are gitignored, not deleted — add new ones to `.gitignore` deliberately | no |
-| `opencode/` | design proposals produced by AI coding tools (documentation) | — |
+| `specs/` | spec/proposal documents *authored by* AI coding tools, one subfolder per producing tool or change — the evidence trail behind what shipped in `src/`. Hand-written design docs are the different thing and live in `docs/`; see "AI skills & specs" for where these come from | — |
 
 ## Storage conventions
 
@@ -144,6 +147,42 @@ are already there). Env convention lives only in
 - Tests mirror the source layout: `tests/test_<project>/test_<module>.py`.
 - Commit messages: short, lowercase, imperative ("add file manager with
   graded metadata search"); mention the *why* in the body when non-obvious.
+
+## AI skills & specs
+
+- **`src/skill_manager/` is the whole model**; `skills` is its only entry point:
+  `uv run skills sync` provisions what is missing and rebuilds the installs,
+  `skills list` shows pins vs. what is actually checked out, `skills outdated`
+  fetches and reports how far each pin trails its upstream (and which skills
+  moved), `skills add <repo>` clones a new upstream and prints the declaration
+  to paste. The two generated views — `repo-skills/` clones and
+  `.opencode/skills/` installs — are never hand-edited and stay gitignored.
+  How-tos, error-message decoding, and the rationale for each choice are in
+  `docs/skill-manager-guide.md`.
+- What gets installed is one tracked table: `sources.UPSTREAMS`, one entry per
+  repository, each pinned to a **full commit sha** (same posture as
+  `ocr_backend.models`). So an upstream update is a `commit` bump plus
+  `skills sync`, never a `git pull` — a pull would leave the machine holding
+  state the repo knows nothing about. Another agent tool that reads skills from
+  the workspace is one entry in `sources.TARGET_DIRS`; a new upstream is one
+  `UPSTREAMS` entry. `uv run skills sync` on a clean machine reproduces the
+  whole set (verified: a deleted clone came back at its pin).
+- A clone is a mirror, so local differences go to the tracked **`skills/`**
+  directory (`sources.OWN_SKILLS_DIR`) instead: a folder there named as the
+  skill *installs* (`superpowers-brainstorming`, prefix included) replaces it
+  in every target, which is how an edit survives the next pin bump. `sync`
+  refuses to move a clone carrying uncommitted changes precisely so the fix
+  lands here rather than in a place git never sees.
+- The skills that *write* specs are `openspec-proposal` / `-apply` /
+  `-archive` (SDD workflow) and `superpowers-brainstorming` /
+  `-writing-plans`. Whatever they produce gets archived under **`specs/`**,
+  keyed by the tool or change that authored it. Upstream's openspec skills
+  hard-code their output to `openspec/changes/<id>/`, so this repo carries its
+  own copies at `skills/openspec-{proposal,apply,archive}/` with those paths
+  redirected to `specs/openspec/` — a run lands in the tracked folder, and no
+  root-level `openspec/` ever appears. `superpowers-*` output has no such
+  hard-coding and is filed under `specs/superpowers/` by hand; re-copying the
+  overrides after a pin bump is covered in `docs/skill-manager-guide.md` §6.
 
 ## Docs
 
