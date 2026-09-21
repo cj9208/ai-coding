@@ -8,6 +8,8 @@ M1 registers exactly one path (fts); adding a second is one entry in
 
 from __future__ import annotations
 
+from storage import SqliteCache, sha256_hex
+
 from .assemble import assemble
 from .contract import EvidencePack
 from .fts_path import Fts5Path
@@ -40,6 +42,7 @@ def retrieve(
     k: int = 5,
     shaped: ShapedQuery | None = None,
     tracer: Tracer | None = None,
+    cache: SqliteCache | None = None,
 ) -> EvidencePack:
     tracer = tracer or NO_TRACER
     with tracer.span(
@@ -51,6 +54,19 @@ def retrieve(
         elif not (paths := build_paths(store, version)):
             pack = empty_pack(question, "active snapshot has no live representations")
         else:
+            cache_key = sha256_hex(f"{question}:{k}")
+            cache_tag = str(version)
+            if cache is not None:
+                cached = cache.get(cache_key, tag=cache_tag)
+                if cached is not None:
+                    pack = EvidencePack.model_validate_json(cached)
+                    rsp.set(
+                        cache_hit=True,
+                        snapshot_version=version,
+                        n_candidates=pack.strength.get("n_candidates", 0),
+                        insufficient=pack.insufficient,
+                    )
+                    return pack
             shaped = shaped or TracedShaper(LexicalShaper(), tracer).shape(question)
             outcomes = [
                 (p.name, TracedPath(p, tracer).search(shaped, k * 2)) for p in paths
@@ -63,6 +79,8 @@ def retrieve(
                 k,
                 path_meta=[out.meta for _, out in outcomes],
             )
+            if cache is not None:
+                cache.put(cache_key, pack.model_dump_json(), tag=cache_tag)
         rsp.set(
             snapshot_version=version,
             n_candidates=pack.strength.get("n_candidates", 0),

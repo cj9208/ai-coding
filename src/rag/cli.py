@@ -30,6 +30,7 @@ import json
 import sys
 from pathlib import Path
 
+from storage import SqliteCache
 from utils.paths import data_dir as default_data_dir
 
 from .answer import generate
@@ -239,10 +240,11 @@ def _print_pack(pack) -> None:  # noqa: ANN001
 def _cmd_query(args: argparse.Namespace) -> int:
     tracer = _tracer(args)
     store = RagStore(args.data_dir / "kb.db")
+    cache = SqliteCache(args.data_dir / "cache.db")
     rc = 0
     try:
         with tracer.span("rag.query", question=args.question[:120]):
-            pack = retrieve(store, args.question, k=args.k, tracer=tracer)
+            pack = retrieve(store, args.question, k=args.k, tracer=tracer, cache=cache)
             _print_pack(pack)
             if not args.retrieve_only:
                 with tracer.span(
@@ -263,6 +265,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
                     print(f"notes: {answer.notes}")
                 rc = 0 if answer.outcome in (Outcome.answered, Outcome.partial) else 2
     finally:
+        cache.close()
         store.dispose()
         _report_trace(tracer.close())
     return rc

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from rag.assemble import assemble
 from rag.contract import Candidate
 from rag.engine import empty_pack, retrieve
 from rag.fuse import rrf_fuse
 from rag.shape import LexicalShaper
+from storage import SqliteCache
 
 
 def test_shaper_splits_long_cjk_runs():
@@ -81,3 +84,39 @@ def test_retrieve_before_any_build(store):
 
 def test_empty_pack_helper():
     assert empty_pack("q", "why").insufficient
+
+
+def test_retrieve_with_cache_returns_same_result(built, tmp_path: Path):
+    store, _ = built
+    cache = SqliteCache(tmp_path / "cache.db")
+    try:
+        pack1 = retrieve(store, "年假审批", k=3, cache=cache)
+        pack2 = retrieve(store, "年假审批", k=3, cache=cache)
+        assert pack1.query == pack2.query
+        assert [c.chunk_id for c in pack1.chunks] == [c.chunk_id for c in pack2.chunks]
+        assert pack1.strength == pack2.strength
+    finally:
+        cache.close()
+
+
+def test_cache_miss_on_version_change(built, tmp_path: Path):
+    """After a rebuild (new version), old cache entries are skipped."""
+    store, _ = built
+    cache = SqliteCache(tmp_path / "cache.db")
+    try:
+        retrieve(store, "年假审批", k=3, cache=cache)
+        version1 = store.active_version()
+        # Simulate a version bump by directly writing a cache entry with old tag
+        from storage import sha256_hex
+
+        key = sha256_hex("年假审批:3")
+        cache.put(
+            key,
+            '{"query":"年假审批","chunks":[],"strength":{},"insufficient":true,"notes":["stale"]}',
+            tag=str(version1),
+        )
+        # Same query, same version -> hits cache (the entry we just wrote)
+        pack2 = retrieve(store, "年假审批", k=3, cache=cache)
+        assert pack2.insufficient  # from our injected stale entry
+    finally:
+        cache.close()

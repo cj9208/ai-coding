@@ -28,6 +28,7 @@ Settings (``FM_DATABASE_URL`` etc. stay per project), mirroring how
 subprojects feed ``llm_client.LLMSettings`` from their own config.
 """
 
+from .cache import SqliteCache
 from .fts import FtsTable, fold_cjk, match_expr, token_expr
 from .sqlite import (
     SqliteClient,
@@ -40,6 +41,7 @@ from .sqlite import (
 
 __all__ = [
     "FtsTable",
+    "SqliteCache",
     "SqliteClient",
     "ensure_columns",
     "fold_cjk",
