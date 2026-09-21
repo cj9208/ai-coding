@@ -17,3 +17,10 @@ frontend plus one engine on a supported x86_64 platform (reported as `AMD64` on
 Windows): `uv sync --extra ocr --extra paddle-cpu`, or `--extra ocr --extra
 paddle-gpu` for the GPU engine, which resolves from Paddle's official cu126
 index (Windows and Linux only).
+
+Alternatively, run OCR in a one-shot Docker runner so the host needs neither
+Paddle nor Poppler: `ocr-backend container build`, then
+`ocr-backend container download paddleocr-vl-1.6`, then
+`ocr-backend container parse data/ocr_backend/in/<file>.pdf` (add `--gpu` to
+all three for the GPU image). See
+`docs/service-containerization-exploration.md` §1.1 for the full guide.

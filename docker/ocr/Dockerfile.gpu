@@ -1,0 +1,38 @@
+# OCR runner — GPU profile.
+#
+# Same code and same `ocr-backend parse` entry point as Dockerfile.cpu; the
+# only difference is the Paddle engine: `paddle-gpu` resolves from the
+# cu126 index declared in pyproject.toml ([tool.uv.index] + [tool.uv.sources]).
+# Not a drop-in for the CPU image — the CUDA/Paddle combination has to be
+# re-verified on the target host before it is trusted (see
+# docs/service-containerization-exploration.md §5.3); bump the index URL there
+# and here together if the CUDA channel changes.
+#
+#   docker compose -f docker/ocr/compose.yaml --profile gpu build ocr-gpu
+#   docker compose -f docker/ocr/compose.yaml --profile gpu run --rm \
+#     ocr-gpu parse /work/in/scan.pdf --out /work/out --device gpu
+#
+# Requires Docker Desktop's WSL2 backend + NVIDIA driver on the Windows host
+# (driver on the host, never inside this image), and is linux/amd64-only.
+
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock readme.md ./
+RUN uv sync --locked --no-install-project --extra ocr --extra paddle-gpu
+
+COPY src/ src/
+RUN uv sync --locked --extra ocr --extra paddle-gpu
+
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:${PATH}" \
+    HOME=/work
+
+ENTRYPOINT ["ocr-backend"]

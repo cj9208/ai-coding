@@ -34,7 +34,12 @@ the others, except where noted below.
 - Run tests: `uv run pytest`. Async tests work via `asyncio_mode = "auto"`
   (no markers needed).
 - CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`,
-  `research-agent`, `ocr-backend` (`[project.scripts]`).
+  `research-agent`, `ocr-backend` (`[project.scripts]`). `ocr-backend` has
+  three subcommands: `download <model>` (provisions a snapshot), `parse <file>
+  --out <dir>` (one-shot OCR runner entry point, writes `OcrDocument` JSON +
+  markdown), and `container build|download|parse [--gpu]` (shells out to the
+  Docker runner below so the compose invocation doesn't have to be retyped —
+  see "Docker").
 - `test_summarize_live` is the only test hitting a real LLM API (skipped when
   `LLM_API_KEY` unset). A 401 there means the key in `.env` is stale — an
   environment issue, not a code regression.
@@ -88,6 +93,28 @@ are already there). Env convention lives only in
   The `fold_cjk` folding now lives in the shared layer — build indexes with
   `storage.FtsTable` and queries with `storage.match_expr`/`token_expr` so
   the write and query ends can't drift (`src/storage/fts.py`).
+
+## Docker
+
+- Only OCR is containerized so far, as a **one-shot runner** (not a service):
+  `docker/ocr/Dockerfile.{cpu,gpu}` + `docker/ocr/compose.yaml`, with two
+  Compose profiles (`--profile cpu` / `--profile gpu`). Build/run commands are
+  in the compose file's header comment.
+- Prefer `ocr-backend container build|download|parse [--gpu]`
+  (`src/ocr_backend/container.py`) over retyping `docker compose ...`: it
+  resolves the compose path, profile, and service name from `REPO_ROOT`, and
+  maps host paths under `data/ocr_backend/{in,out}` to the container's
+  `/work/{in,out}` mounts — a file outside those directories is rejected with
+  a clear error instead of a silent Docker failure.
+- The runner mounts `data/ocr_backend/{models,in,out}` — models stay outside
+  the image (bind-mounted at the container's `REPO_ROOT`-anchored default
+  path), inputs are read-only, results land in `out/` and survive `--rm`.
+- Rationale (why a runner, not an HTTP service, and why CPU/GPU are separate
+  images): `docs/service-containerization-exploration.md`.
+- Not yet verified end-to-end on this machine — Docker CLI is unavailable in
+  the current shell, so the image build and a real container parse run still
+  need to be confirmed on a host with Docker Desktop installed (the wrapper's
+  own unit tests fake `subprocess.run` and don't need Docker).
 
 ## Style & checks
 

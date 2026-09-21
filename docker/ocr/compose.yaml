@@ -1,0 +1,46 @@
+# One-shot OCR runner, CPU or GPU. This is not a service: `run --rm` starts a
+# container, parses one document into the mounted output dir, and exits. The
+# OCR backend / HTTP service / queue discussion lives in
+# docs/service-containerization-exploration.md.
+#
+#   docker compose -f docker/ocr/compose.yaml --profile cpu build
+#   docker compose -f docker/ocr/compose.yaml --profile cpu run --rm \
+#     ocr-cpu parse /work/in/scan.pdf --out /work/out --device cpu
+#
+#   docker compose -f docker/ocr/compose.yaml --profile gpu build
+#   docker compose -f docker/ocr/compose.yaml --profile gpu run --rm \
+#     ocr-gpu parse /work/in/scan.pdf --out /work/out --device gpu
+#
+# The model store is bind-mounted at the container's default repo-root data
+# path (/app/data/ocr_backend/models — see src/utils/paths.py), so
+# `ocr-backend download` and the adapter's snapshot lookup both hit the host
+# copy without an extra --model-dir flag.
+
+x-ocr-volumes: &ocr-volumes
+  - ../../data/ocr_backend/models:/app/data/ocr_backend/models
+  - ../../data/ocr_backend/in:/work/in:ro
+  - ../../data/ocr_backend/out:/work/out
+
+services:
+  ocr-cpu:
+    profiles: [cpu]
+    build:
+      context: ../..
+      dockerfile: docker/ocr/Dockerfile.cpu
+    image: ai-coding-ocr-cpu:latest
+    volumes: *ocr-volumes
+
+  ocr-gpu:
+    profiles: [gpu]
+    build:
+      context: ../..
+      dockerfile: docker/ocr/Dockerfile.gpu
+    image: ai-coding-ocr-gpu:latest
+    volumes: *ocr-volumes
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

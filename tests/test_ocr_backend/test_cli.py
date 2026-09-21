@@ -1,11 +1,21 @@
 """``ocr-backend`` CLI + model-registry tests — no network, no model load."""
 
 import builtins
+import json
 
 import pytest
 
 from ocr_backend import cli
 from ocr_backend.backends import paddleocr_vl
+from ocr_backend.contract import (
+    BlockKind,
+    ContentFormat,
+    OcrBackendInfo,
+    OcrBlock,
+    OcrDocument,
+    OcrPage,
+    OcrSource,
+)
 from ocr_backend.models import MODELS, is_ready
 
 
@@ -80,3 +90,131 @@ def test_missing_huggingface_hub_reports_install_hint(monkeypatch, tmp_path):
 
     with pytest.raises(ImportError, match=r"uv sync --extra ocr --extra paddle-cpu"):
         cli._fetch(MODELS["paddleocr-vl-1.6"], tmp_path)
+
+
+# --------------------------------------------------------------- parse subcommand
+
+
+def _fake_document() -> OcrDocument:
+    return OcrDocument(
+        source=OcrSource(kind="pdf", path="demo.pdf", sha256="0" * 64, page_count=1),
+        backend=OcrBackendInfo(
+            name="paddleocr_vl",
+            library_version="3.7.0",
+            model="PaddleOCR-VL-1.6-0.9B",
+            pipeline_version="v1.6",
+            options={"use_layout_detection": True},
+        ),
+        created_at="2026-09-21T12:00:00+08:00",
+        pages=[
+            OcrPage(
+                page_index=0,
+                width=1191,
+                height=1684,
+                blocks=[
+                    OcrBlock(
+                        id=0,
+                        kind=BlockKind.title,
+                        raw_label="doc_title",
+                        content="Hello",
+                        content_format=ContentFormat.text,
+                        bbox=(95.0, 129.0, 825.0, 171.0),
+                        order=1,
+                        score=0.7884,
+                    )
+                ],
+            )
+        ],
+    )
+
+
+class _FakeBackend:
+    """Stands in for PaddleOCRVLBackend — records what it was built with and
+    whether close() ran, without ever importing paddleocr."""
+
+    last_config = None
+    closed = False
+
+    def __init__(self, config):
+        _FakeBackend.last_config = config
+        _FakeBackend.closed = False
+
+    def parse(self, source):
+        return _fake_document()
+
+    def close(self):
+        _FakeBackend.closed = True
+
+
+@pytest.fixture
+def fake_backend(monkeypatch):
+    _FakeBackend.last_config = None
+    _FakeBackend.closed = False
+    monkeypatch.setattr(paddleocr_vl, "PaddleOCRVLBackend", _FakeBackend)
+    return _FakeBackend
+
+
+def test_parse_writes_contract_json_and_markdown(fake_backend, tmp_path):
+    source = tmp_path / "demo.pdf"
+    source.write_bytes(b"%PDF-fake")
+    out_dir = tmp_path / "out"
+
+    json_path = cli.parse(source, out_dir)
+
+    assert json_path == out_dir / "demo.ocr.json"
+    dumped = json.loads(json_path.read_text(encoding="utf-8"))
+    assert dumped["schema_version"] == "1.0"
+    assert dumped["pages"][0]["blocks"][0]["content"] == "Hello"
+
+    md_path = out_dir / "demo.ocr.md"
+    assert md_path.read_text(encoding="utf-8") == "# Hello"
+
+    source_copy = out_dir / "demo.pdf"
+    assert source_copy.read_bytes() == b"%PDF-fake"
+    assert fake_backend.closed
+
+
+def test_parse_passes_cli_flags_through_to_config(fake_backend, tmp_path):
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"%PDF-fake")
+
+    cli.main(
+        [
+            "parse",
+            str(source),
+            "--out",
+            str(tmp_path / "out"),
+            "--device",
+            "cpu",
+            "--pipeline-version",
+            "v1.6",
+            "--model-dir",
+            "/models/paddleocr-vl-1.6",
+            "--format-block-content",
+        ]
+    )
+
+    cfg = fake_backend.last_config
+    assert cfg.device == "cpu"
+    assert cfg.pipeline_version == "v1.6"
+    assert str(cfg.model_dir) == "/models/paddleocr-vl-1.6"
+    assert cfg.format_block_content is True
+
+
+def test_parse_closes_backend_even_after_success(fake_backend, tmp_path):
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"%PDF-fake")
+
+    cli.parse(source, tmp_path / "out")
+
+    assert fake_backend.closed
+
+
+def test_cli_parse_missing_source_exits_before_touching_backend(
+    fake_backend, tmp_path, capsys
+):
+    rc = cli.main(["parse", str(tmp_path / "nope.pdf"), "--out", str(tmp_path / "out")])
+
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err
+    assert fake_backend.last_config is None

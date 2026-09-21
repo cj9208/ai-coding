@@ -1,0 +1,19 @@
+# Build context is the repo root (see docker/ocr/compose.yaml). Keep local
+# state out of it: the venv, every default data path (DBs, model snapshots,
+# OCR run artifacts), caches, VCS metadata, and secrets.
+.venv/
+venv/
+data/
+logs/
+paddleocr-vl-1.6/
+.env
+__pycache__/
+*.pyc
+.git/
+.opencode/
+openspec-skills/
+repo-skills/
+docs/
+opencode/
+shell_scipts/
+tests/
