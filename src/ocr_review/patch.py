@@ -152,35 +152,57 @@ def reanchor(
     for pr in review.pages:
         page = carried.page(pr.page_index)
         page.status = pr.status
-        for block_id, entry in pr.entries.items():
-            if entry.state is BlockState.added:
-                page.entries[block_id] = entry
-                continue
-            old_block = old_blocks.get((pr.page_index, block_id))
-            matched = (
-                _best_match(old_block, new_by_page.get(pr.page_index, []))
-                if old_block is not None
-                else None
-            )
-            if matched is not None:
-                page.entries[matched] = entry
-            elif entry.state is not BlockState.kept:
+        added = {bid for bid, e in pr.entries.items() if e.state is BlockState.added}
+        for block_id in sorted(added):
+            page.entries[block_id] = pr.entries[block_id]
+        matched, unmatched = _match_page(
+            [bid for bid, e in pr.entries.items() if bid not in added],
+            old_blocks,
+            pr.page_index,
+            new_by_page.get(pr.page_index, []),
+            occupied=added,
+        )
+        for new_id, old_id in matched.items():
+            page.entries[new_id] = pr.entries[old_id]
+        for old_id in unmatched:
+            entry = pr.entries[old_id]
+            if entry.state is not BlockState.kept:
                 # a kept verdict on a vanished block asserts nothing to lose;
                 # any real correction must never vanish quietly
-                lost.append((pr.page_index, block_id))
+                lost.append((pr.page_index, old_id))
     return Reanchored(review=carried, lost=lost)
 
 
-def _best_match(old: OcrBlock, candidates: list[OcrBlock]) -> int | None:
-    best_id, best_score = None, 0.0
-    for block in candidates:
-        iou = _iou(old.bbox, block.bbox)
-        if iou < _IOU_FLOOR:
+def _match_page(
+    old_ids: list[int],
+    old_blocks: dict[tuple[int, int], OcrBlock],
+    page_index: int,
+    candidates: list[OcrBlock],
+    occupied: set[int],
+) -> tuple[dict[int, int], list[int]]:
+    """Greedy one-to-one assignment: highest-scoring pair claims its block
+    first, so two corrections can never land on one id and overwrite each
+    other. Returns ``{new_id: old_id}`` and the old ids left unmatched."""
+    scored: list[tuple[float, int, int]] = []
+    for old_id in old_ids:
+        old = old_blocks.get((page_index, old_id))
+        if old is None:
             continue
-        ratio = _text_ratio(old.content, block.content)
-        if ratio < _TEXT_FLOOR:
+        for block in candidates:
+            iou = _iou(old.bbox, block.bbox)
+            if iou < _IOU_FLOOR:
+                continue
+            ratio = _text_ratio(old.content, block.content)
+            if ratio < _TEXT_FLOOR:
+                continue
+            scored.append((iou + ratio, old_id, block.id))
+    scored.sort(key=lambda t: (-t[0], t[1], t[2]))
+    taken_new, taken_old = set(occupied), set()
+    matched: dict[int, int] = {}
+    for _score, old_id, new_id in scored:
+        if old_id in taken_old or new_id in taken_new:
             continue
-        score = iou + ratio
-        if score > best_score:
-            best_id, best_score = block.id, score
-    return best_id
+        taken_old.add(old_id)
+        taken_new.add(new_id)
+        matched[new_id] = old_id
+    return matched, [old_id for old_id in old_ids if old_id not in taken_old]

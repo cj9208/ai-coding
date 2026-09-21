@@ -105,3 +105,44 @@ def test_reanchor_shifted_ids_keep_human_edits(doc_pair):
     assert result.review.entry(0, 5) is not None, "correction follows the match"
     assert result.review.entry(0, 5).content == "fixed"
     assert (1, 1) in result.lost, "a rejected-against-a-vanished-block must surface"
+
+
+def test_reanchor_contested_match_never_overwrites(doc_pair):
+    doc, _ = doc_pair
+    # two old blocks nearly identical, so both would claim the same new block
+    old0 = doc.pages[0].blocks[0]
+    old1 = doc.pages[0].blocks[1]
+    old1.bbox = (45.0, 50.0, 235.0, 64.0)
+    old1.content = old0.content
+    review = _review()
+    review.page(0).entries[0] = rv.ReviewEntry(state="corrected", content="fix-A")
+    review.page(0).entries[1] = rv.ReviewEntry(state="corrected", content="fix-B")
+
+    new = make_doc(doc_pair[1], {0: (300, 400), 1: (301, 401)})
+    new.pages[0].blocks = [new.pages[0].blocks[0]]  # both collapse into id 0
+
+    result = reanchor(review, doc, new)
+
+    assert result.review.entry(0, 0).content == "fix-A", "better match wins"
+    assert (0, 1) in result.lost, "the loser must surface, not overwrite silently"
+
+
+def test_reanchor_added_id_wins_contested_slot(doc_pair):
+    doc, _ = doc_pair
+    review = _review()
+    review.page(0).entries[5] = rv.ReviewEntry(
+        state="added",
+        kind=BlockKind.paragraph,
+        content_format=ContentFormat.text,
+        content="mine",
+        bbox=(1.0, 1.0, 2.0, 2.0),
+    )
+    review.page(0).entries[0] = rv.ReviewEntry(state="corrected", content="fixed")
+
+    new = make_doc(doc_pair[1], {0: (300, 400), 1: (301, 401)})
+    new.pages[0].blocks[0].id = 5  # collides with the added entry's id
+
+    result = reanchor(review, doc, new)
+
+    assert result.review.entry(0, 5).state is rv.BlockState.added
+    assert (0, 0) in result.lost
