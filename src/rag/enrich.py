@@ -35,6 +35,16 @@ logger = logging.getLogger(__name__)
 
 _MAX_INPUT_CHARS = 2000
 
+
+class EnrichPartialError(RuntimeError):
+    """Raised when one or more chunks fail enrichment — the error carries
+    per-chunk failure details so the caller can report them."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__(f"{len(errors)} chunk(s) failed enrichment")
+
+
 _SYSTEM = (
     "You annotate document chunks to make them findable. Produce a short "
     "title, search keywords, and a factual summary of the chunk ONLY — no "
@@ -117,6 +127,8 @@ class LlmEnricher:
                 for chunk in todo
             ]
 
+            errors: list[str] = []
+
             for future in asyncio.as_completed(futures):
                 try:
                     chunk_id, insight = await future
@@ -137,8 +149,12 @@ class LlmEnricher:
                                     "summary": insight.summary,
                                 }
                                 break
-                except Exception:
+                except Exception as exc:
+                    errors.append(f"{exc}")
                     logger.exception("enrich failed for chunk")
+
+            if errors:
+                raise EnrichPartialError(errors)
         finally:
             await q.stop()
 
@@ -235,6 +251,8 @@ def enrich_corpus(
     errors: list[str] = []
     try:
         asyncio.run(enricher.enrich(ordered))
+    except EnrichPartialError as exc:
+        errors.extend(exc.errors)
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")
 
