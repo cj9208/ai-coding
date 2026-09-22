@@ -221,6 +221,11 @@ are already there). Env convention lives only in
   packs in `src/orchestrator/packs/` (zh verbatim + en first tranche;
   `safety.evaluate(text, locale)`; an unknown locale clarifies via
   `s_unsupported_locale` — the old silent-allow fallthrough for
-  non-Chinese input is gone). The service host that would consume the
+  non-Chinese input is gone). **05b steps 4–5 landed too**: the
+  adversarial test class (`test_adversarial.py`) fixed two real holes —
+  the safety gate now also sees clarification *answers*, and gate
+  constraints can't be revoked by a model proposal — while the gateway
+  contract (authN/rate-limit/moderation before `run_turn`) is written
+  into `03-usage.md`. The service host that would consume the
   rest is unbuilt; remaining 05b–05d steps are gated on their triggers.
   The contract stays the decisions authority.

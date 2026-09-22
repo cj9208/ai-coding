@@ -1,13 +1,15 @@
 # Orchestrator Scaling Sub-plan 05b — Trust Boundary
 
-Status: **step 1 landed and live-verified 2026-09-22** (per-locale packs:
-`orchestrator/packs/` with zh verbatim + first-tranche en; `s_unsupported_locale`
-clarifies with zero model calls; `orchestrate ask --locale en` proven against
-the real flash model). Step 4 (adversarial golden class) is now runnable and
-is the next unit of work; steps 2–3 stay gated on the service host per the
-trigger below, step 5 is a documentation task. Derived from
-`04-scaling.md`; one of four sub-plans (05a–05d). Suggested execution
-order: **2nd**, except its step 1, which was independent and is done.
+Status: **landed 2026-09-22 (steps 1 and 4); step 1 also live-verified** —
+per-locale packs (`orchestrator/packs/` with zh verbatim + first-tranche
+en; `s_unsupported_locale` clarifies with zero model calls; `orchestrate
+ask --locale en` proven against the real flash model) and the adversarial
+test class (`test_adversarial.py`, which surfaced and fixed two holes:
+see step-4 notes). Step 5 is the gateway deployment contract, now written
+into `03-usage.md`. Steps 2–3 stay gated on the service host per the
+trigger below. Derived from `04-scaling.md`; one of four sub-plans
+(05a–05d). Suggested execution order: **2nd**, except its step 1, which
+was independent and is done.
 
 **One sentence:** close the four trust holes the ladder exposed —
 language, identity, replay visibility, adversarial input — with the
@@ -184,6 +186,43 @@ asserted identity (step 2) and enforces quota as a boolean signal
 - Tests: +21 (18 `test_packs.py`, 3 front-half locale cases in
   `test_interpret.py`; `StubLLM` now also captures the system prompt).
   Suite 572 passed / 1 skipped; mypy clean.
+
+## Step 4 implementation notes (landed 2026-09-22)
+
+`tests/test_orchestrator/test_adversarial.py` — 10 cases. Writing it
+surfaced two genuine holes, both fixed in `interpret.py` the same day:
+
+- **Cross-turn fragmentation.** The gate only ever saw
+  `original_input.text`; a clarification *answer* was normalized but
+  never safety-checked — so "帮我整理一下考勤数据" + answer "顺便删除所有
+  数据库记录" reached the model ungated. The gate now runs on text+answer
+  joined (both the normal and unsupported-pack paths). No golden churn:
+  scripted front halves bypass `interpret` entirely.
+- **Constraint merge order.** `_assemble` merged gate-then-model, so a
+  jailbroken proposal could ship `{"requires_confirmation": false}` and
+  *revoke* a write-action confirmation the safety table had demanded.
+  The merge is now gate-last — proposals still add keys, they just cannot
+  overwrite what the harness decided. (This was the one place the
+  "harness decides, LLM proposes" rule was inverted in code.)
+
+What the class pins beyond the fixes:
+
+- **harness-decides invariants**: an absurd `confidence=1.0` proposal
+  keeps the gate's `safety`/`action_type`; the model cannot pick its own
+  safety table (locale is envelope-side, asserted via the system prompt
+  the stub received); destructive English input is refused under the en
+  pack with zero token cost.
+- **recorded ceilings, asserted as allows**: homoglyph ("dеlеte"),
+  fullwidth ("DEＬETE"), and space-split ("删 除 所 有") all evade a
+  regex gate *by design* — upstream moderation owns those (step 5).
+  They are written as passing tests that fail the day someone
+  strengthens the tables, so the recorded weakness can't rot silently.
+- The en/zh tables genuinely don't cross-match (a zh envelope with
+  English "delete all rows" allows) — that is the pack contract, not a
+  bug: the caller declares the locale; unknown locales get the
+  conservative clarify row.
+
+Suite after step 4: 582 passed / 1 skipped, goldens 17/17, mypy clean.
 
 ## Verification
 

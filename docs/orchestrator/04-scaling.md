@@ -73,7 +73,7 @@ only prose here.
 | A.4 config-as-release | **open** | 05d |
 | A.5 batching → Postgres, in that order | **batching done; Postgres closed as "won't trigger"** for pilot-A throughput, with named reopen conditions | 05a steps 3–4 (verdict) |
 | A.6 handoff = headcount | **open** | 05d |
-| B.1 adversarial input | **open** — posture holds structurally, hardening absent | 05b, before any public exposure |
+| B.1 adversarial input | **hardened (harness side)** — adversarial test class landed; two real holes found + fixed (ungated resume answer, model-revocable gate constraint); regex-gate ceilings recorded, gateway contract written | 05b steps 4–5 (2026-09-22); authN/rate-limit enforcement awaits a deployment |
 | B.2 LLM call as economic decision | **open** — fast path + answer cache unbuilt | 05c |
 | B.3 no idempotency | **open** — one envelope field + one uniqueness check, unbuilt | 05b, before public traffic |
 | B.4 streaming latency | **open** — needs a host to own the response stream (embeddability itself is no longer the blocker) | after the service host exists |
@@ -354,6 +354,16 @@ benchmark; every claim cites the file that makes it.
    hardening *outside* the harness: upstream moderation, authN,
    device/IP rate limiting before `run_turn`, and adversarial golden
    cases as a test class.
+
+   > **Landed (05b steps 4–5, 2026-09-22):** the adversarial test class
+   > exists (`test_adversarial.py`) and surfaced two real holes it then
+   > fixed — a clarification *answer* was never safety-checked (gate now
+   > sees text+answer), and a model proposal could overwrite gate
+   > constraints, i.e. revoke `requires_confirmation` (merge is now
+   > gate-last). Regex-gate evasions (homoglyph/fullwidth/space-split)
+   > are asserted as *recorded ceilings*; the gateway contract that owns
+   > them is written into `03-usage.md`. AuthN/rate-limit enforcement
+   > still awaits a deployment.
 2. **The per-turn LLM call is an economic decision, and the escape hatch
    is already built.** `interpret.py` calls the model on every
    non-refused turn. `normalize` already computes exactly the evidence

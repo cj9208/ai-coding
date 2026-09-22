@@ -135,11 +135,33 @@ loads no corpus, no file_manager web stack.
 
 | Import | What |
 | --- | --- |
-| `orchestrator.runtime.Orchestrator(store, registry, front_half)` | `run_turn(text, user_id=...)` / `resume(request_id, answer)` → `TurnResult(status, response, question, request_id)`. Pass any `FrontHalf` — `LlmFrontHalf` for prod, `interpret.FakeFrontHalf` for tests |
+| `orchestrator.runtime.Orchestrator(store, registry, front_half)` | `run_turn(text, user_id=..., locale=...)` / `resume(request_id, answer)` → `TurnResult(status, response, question, request_id)`; async twins `run_turn_async` / `resume_async` for embedding in a running event loop (05a step 5 — the sync entries fail fast inside a loop). Pass any `FrontHalf` — `LlmFrontHalf` for prod, `interpret.FakeFrontHalf` for tests |
 | `orchestrator.registry.load_default()` | production view: YAML + bound impls (rag_query, structured_lookup) |
 | `orchestrator.registry.load_static()` | code fixture for tests/golden — regression never needs a built corpus |
 | `orchestrator.store.Store(db_path)` | three-table persistence; `get_request` / `objects` / `events` / `objects_of_kind` |
 | `orchestrator.config.Budget/Thresholds` | every tunable, in one namespace each (see `02-implementation.md` constants table) |
+
+## Deployment contract: what sits in front of `run_turn` (05b step 5)
+
+Not orchestrator code — this is the seam the *service host* must honor
+before any public exposure. Division of labor, one sentence each:
+
+- **Gateway (outside the harness):** authentication, per-identity and
+  per-IP rate limiting, and optional content moderation. These filter;
+  they never decide. Homoglyph/fullwidth/space-split evasions of the
+  regex gate (recorded in `test_adversarial.py`) are this layer's
+  problem, not the table's.
+- **Orchestrator (inside the harness):** receives *asserted* identity —
+  the caller has already authenticated, the harness never verifies.
+  It consumes quota as a boolean signal (05c), routes on it, and keeps
+  every decision deterministic and row-auditable (DP-7). The locale
+  pack is likewise caller-declared (`run_turn(locale=...)`) — the
+  proposal side never selects the table that gates it.
+- **Rule of thumb:** anything that *filters text or counts requests per
+  principal* is gateway work; anything that *decides an outcome* is
+  table work inside the harness. A gateway that starts making routing
+  decisions has blurred DP-1; a harness that starts verifying tokens
+  has invented a trust root it cannot audit.
 
 ## Reproducing the two live proofs
 

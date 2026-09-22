@@ -67,8 +67,12 @@ ask it questions; the contract first if you intend to *change* behavior;
   also landed the same day — **per-locale front-half packs**
   (`orchestrator/packs/`, zh verbatim + en first tranche; unknown
   locale clarifies, never silently allows; live-proven with an English
-  ask on the real flash model). Remaining 05b–05d steps await their
-  triggers. 04 carries a **problem status ledger** — read it first for
+  ask on the real flash model) plus the **adversarial class**
+  (`test_adversarial.py` — two real holes fixed: resume answers are now
+  gated, gate constraints can no longer be revoked by a proposal) and
+  the **gateway deployment contract** in `03-usage.md`. Remaining 05b
+  steps (identity, idempotency) and 05c–05d await their triggers.
+  04 carries a **problem status ledger** — read it first for
   per-problem state.
 
 ## Data at a glance

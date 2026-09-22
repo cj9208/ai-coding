@@ -105,6 +105,10 @@ class LlmFrontHalf:
         escalated: bool = False,
     ) -> FrontHalfOutput:
         text = envelope.original_input.text
+        # the gate sees the *whole* user turn: a destructive fragment
+        # arriving as a clarification answer must not bypass it
+        # (05b step 4, cross-turn fragmentation)
+        gated = f"{text} {answer}" if answer else text
         # locale is caller context (set by run_turn), never model output —
         # a proposal must not choose the table that gates it (05b)
         pack = get_pack(envelope.original_input.locale)
@@ -114,12 +118,12 @@ class LlmFrontHalf:
             return self._assemble(
                 envelope,
                 normalize(text, aliases={}),
-                safety_gate.evaluate(text, envelope.original_input.locale),
+                safety_gate.evaluate(gated, envelope.original_input.locale),
                 answer=answer,
                 model=None,
                 model_name="none",
             )
-        verdict = safety_gate.evaluate(text, pack.locale)
+        verdict = safety_gate.evaluate(gated, pack.locale)
         if verdict.decision in (SafetyDecision.refuse, SafetyDecision.handoff):
             # hard stop: deterministic, before any probabilistic step
             norm = normalize(text, aliases=pack.aliases)
@@ -204,8 +208,9 @@ class LlmFrontHalf:
             requested_attributes=list(model.requested_attributes),
             interpretation_summary=model.interpretation_summary,
         )
-        constraints = dict(verdict.constraints)
-        constraints.update(model.constraints)
+        # the gate's constraints win (05b step 4): a proposal cannot talk
+        # the harness out of a confirmation the safety table demanded
+        constraints = {**model.constraints, **verdict.constraints}
         question = (
             verdict.question if verdict.decision == SafetyDecision.clarify_scope else ""
         )
