@@ -197,6 +197,12 @@ are already there). Env convention lives only in
   (see `docs/ai-market-radar-pipeline.md` as the reference example).
 - Multi-part designs get a folder (`docs/research-recommendation-agent/`)
   with a numbered overview as the entry point.
+- `docs/scaling-lessons.md` is the cross-cutting digest: the scale
+  problems rag + orchestrator actually hit (and the shared-layer bugs
+  they exposed), reorganized as six design-time questions plus a
+  checklist to copy into the next subsystem's design doc. Read it
+  before designing schemas; the per-system evidence stays in the two
+  04-scaling docs.
 - `docs/orchestrator-design.md` is the implementation contract for
   `src/orchestrator/` (enterprise request-orchestration runtime; **M0–M3
   all shipped, live-verified**). It fixes the DP-1..DP-10 positions, the M0–M3 build order,
