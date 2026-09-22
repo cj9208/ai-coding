@@ -129,6 +129,12 @@ CLI `quant download / verify / list / record` as the one entry point
   in our wrapper; two cost levels on every run: baseline
   (taker ~10 bp/side) and stressed (2×). **A factor passes only at
   stressed costs.**
+  *(Deviation recorded at implementation, 2026-09-22: screening is a
+  ~150-line polars harness in `quantdesk/screen.py` instead — at the
+  daily grid the arithmetic must agree bar-for-bar with the M3 kernel
+  later, so a second engine's cost semantics would be a thing to
+  understand, not removed. vectorbt stays on the M3 comparison
+  checklist.)*
 - Experiment manifest per run (code hash, data range, params, cost
   settings — the AgentQuant `run_manifests` pattern) + **trial ledger**:
   append-only table, one row per variant ever evaluated, including

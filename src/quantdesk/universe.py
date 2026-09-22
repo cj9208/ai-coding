@@ -80,3 +80,35 @@ def synced_at() -> datetime | None:
         return None
     stamp = files[-1].name.rsplit("-", 1)[-1].removesuffix(".json")
     return datetime.strptime(stamp, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+
+#: 24h ticker stats, same hosts as ENDPOINTS.
+TICKER_URLS = {
+    "spot": "https://data-api.binance.vision/api/v3/ticker/24hr",
+    "um": "https://fapi.binance.com/fapi/v1/ticker/24hr",
+}
+
+
+def rank_by_quote_volume(market: str, top: int) -> list[tuple[str, float]]:
+    """Today's top-N USDT symbols by 24h quote volume.
+
+    A *today* fact, so only TRADING symbols qualify (the latest snapshot
+    filters what the ticker endpoint might still list) and whatever
+    universe is frozen from it must carry this day's date — ranking
+    history by today's activity is survivorship bias wearing a leaderboard.
+    """
+    snapshot = latest(market)
+    if snapshot is None:
+        raise SystemExit("no universe snapshot — run `quant universe sync`")
+    trading = set(snapshot.symbols)
+    rows = httpx.get(TICKER_URLS[market], timeout=30.0, follow_redirects=True).json()
+    ranked = sorted(
+        (
+            (str(row["symbol"]), float(row["quoteVolume"]))
+            for row in rows
+            if str(row["symbol"]) in trading
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    return ranked[:top]

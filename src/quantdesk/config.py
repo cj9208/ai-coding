@@ -67,7 +67,7 @@ class Dataset(NamedTuple):
         return self.name.replace("/", "_")
 
 
-_SPOT_KLINE_STEP = {"1m": 60_000_000, "1s": 1_000_000}
+_SPOT_KLINE_STEP = {"1m": 60_000_000, "1s": 1_000_000, "1d": 86_400_000_000}
 
 
 def _klines(market: str, interval: str, name: str) -> Dataset:
@@ -90,7 +90,9 @@ DATASETS: dict[str, Dataset] = {
     for d in [
         _klines("spot", "1m", "spot_klines_1m"),
         _klines("spot", "1s", "spot_klines_1s"),
+        _klines("spot", "1d", "spot_klines_1d"),
         _klines("futures/um", "1m", "um_klines_1m"),
+        _klines("futures/um", "1d", "um_klines_1d"),
         Dataset(
             name="um_funding_rate",
             market="futures/um",

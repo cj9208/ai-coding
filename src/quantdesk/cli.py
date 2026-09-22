@@ -20,9 +20,13 @@ import asyncio
 import sys
 from datetime import date, timedelta
 
+from utils.paths import REPO_ROOT
+
 from . import archive
 from . import convert as convert_mod
-from . import record, store, universe
+from . import record
+from . import screen as screen_mod
+from . import store, universe
 from .config import DATASETS, parse_csv_list
 
 
@@ -146,12 +150,82 @@ def cmd_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_sets(pairs: list[str]) -> dict:
+    params: dict = {}
+    for pair in pairs:
+        key, _, raw = pair.partition("=")
+        if raw.isdigit():
+            params[key.strip()] = int(raw)
+        else:
+            params[key.strip()] = float(raw)
+    return params
+
+
+def cmd_screen(args: argparse.Namespace) -> int:
+    if args.symbols:
+        symbols = parse_csv_list(args.symbols)
+    elif args.rank:
+        ranked = universe.rank_by_quote_volume("um", args.rank)
+        symbols = [symbol for symbol, _ in ranked]
+        print(
+            f"universe: top {args.rank} by 24h quote volume as of today"
+            " (a today-fact; the manifest freezes this list)",
+            file=sys.stderr,
+        )
+    else:
+        raise SystemExit("pass --symbols or --rank N")
+    spec = screen_mod.ScreenSpec(
+        factor=args.factor,
+        params=_parse_sets(args.set),
+        dataset=args.dataset,
+        symbols=symbols,
+        rebalance_every=args.rebalance,
+        start=args.since,
+        end=args.until,
+        note=args.note,
+    )
+    wide = screen_mod.signals.load_closes(spec.dataset, symbols)
+    funding = (
+        screen_mod.signals.load_funding(symbols)
+        if spec.factor in screen_mod.signals.FAST_FACTORS
+        else None
+    )
+    result = screen_mod.run_screen(spec, wide, funding)
+    print(f"run_id        {spec.run_id}")
+    print(f"sealed before {result.sealed_from} (holdout unread)")
+    print(
+        f"{'cost_bp':>8} {'sharpe':>7} {'cagr':>7} {'maxDD':>7}"
+        f" {'turnover/pa':>11} {'cost/pa':>8} {'days':>5}"
+    )
+    for cost, m in sorted(result.metrics.items()):
+        print(
+            f"{cost:>8g} {m['sharpe']:>7.2f} {m.get('cagr', 0):>7.2%}"
+            f" {m.get('max_drawdown', 0):>7.2%} {m.get('turnover_pa', 0):>11.1f}"
+            f" {m.get('cost_drag_pa', 0):>8.2%} {m['days']:>5}"
+        )
+    verdict = "PASS" if result.passed_stressed else "fail"
+    print(f"stressed-cost verdict: {verdict} (screening only — not proof)")
+    manifest = screen_mod.record_run(result)
+    try:
+        shown = manifest.relative_to(REPO_ROOT)
+    except ValueError:  # redirected (tests)
+        shown = manifest
+    print(f"ledger += rows; manifest -> {shown}")
+    return 0
+
+
 def cmd_universe(args: argparse.Namespace) -> int:
     if args.action == "sync":
         for market in ("spot", "um"):
             snapshot = universe.fetch_snapshot(market)
             path = universe.store_snapshot(snapshot)
             print(f"{market}: {len(snapshot.symbols)} USDT symbols -> " f"{path.name}")
+        return 0
+    if args.action == "rank":
+        ranked = universe.rank_by_quote_volume(args.market, args.top)
+        print(",".join(symbol for symbol, _ in ranked))
+        for symbol, volume in ranked:
+            print(f"{symbol:<12} {volume:>.0f}", file=sys.stderr)
         return 0
     for market in ("spot", "um"):
         stored = universe.latest(market)
@@ -238,8 +312,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.set_defaults(func=cmd_record)
 
+    p = sub.add_parser(
+        "screen",
+        help="run a factor through the screening harness (holdout sealed)",
+    )
+    p.add_argument("--factor", required=True, choices=sorted(screen_mod.FACTORS))
+    p.add_argument("--dataset", default="um_klines_1d")
+    p.add_argument("--symbols", default="", help="csv of symbols")
+    p.add_argument("--rank", type=int, default=0, help="top N by 24h quote volume")
+    p.add_argument("--since", required=True, help="YYYY-MM-DD")
+    p.add_argument("--until", required=True, help="YYYY-MM-DD (clamped to seal)")
+    p.add_argument("--rebalance", type=int, default=5, help="every N bars")
+    p.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="K=V",
+        help="factor param, repeatable (e.g. --set lookback=180 --set hold=20)",
+    )
+    p.add_argument("--note", default="", help="free text into the manifest")
+    p.set_defaults(func=cmd_screen)
+
     p = sub.add_parser("universe", help="dated symbol-list snapshots")
-    p.add_argument("action", choices=["sync", "show"])
+    p.add_argument("action", choices=["sync", "show", "rank"])
+    p.add_argument("--market", default="um", choices=["spot", "um"])
+    p.add_argument("--top", type=int, default=0, help="rank: how many symbols")
     p.set_defaults(func=cmd_universe)
 
     args = parser.parse_args(argv)
