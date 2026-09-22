@@ -22,11 +22,12 @@ replaces that skill in every target.
 
 from __future__ import annotations
 
-import argparse
 import sys
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
+
+import click
 
 from utils.paths import REPO_ROOT
 
@@ -200,59 +201,67 @@ def target_dirs() -> list[Path]:
     return [REPO_ROOT / relative for relative in TARGET_DIRS]
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="skills", description="manage the vendored AI skills in repo-skills/"
-    )
-    sub = parser.add_subparsers(dest="cmd", required=True)
+@click.group()
+def cli() -> None:
+    """manage the vendored AI skills in repo-skills/"""
 
-    s = sub.add_parser("sync", help="provision clones and rebuild the install targets")
-    s.add_argument(
-        "--no-provision",
-        action="store_true",
-        help="skip git; rebuild targets from the clones as they are",
-    )
 
-    sub.add_parser("list", help="show declared pins and installed skills")
-    sub.add_parser("outdated", help="fetch and report pins that trail their upstream")
+@cli.command("sync")
+@click.option(
+    "--provision/--no-provision",
+    default=True,
+    help="skip git; rebuild targets from the clones as they are",
+)
+def sync_cmd(provision: bool) -> None:
+    """provision clones and rebuild the install targets"""
+    raise SystemExit(sync(provision=provision))
 
-    a = sub.add_parser("add", help="clone a new upstream and print its declaration")
-    a.add_argument("repo", help="git repository URL")
-    a.add_argument("--name", default=None, help="upstream label (default: repo stem)")
-    a.add_argument(
-        "--clone",
-        default=None,
-        help="directory to clone into (default: repo-skills/<repo stem>)",
-    )
-    a.add_argument("--skills-dir", default="", help="clone subdir holding the skills")
-    a.add_argument(
-        "--select", default="", help="only skills whose name starts with this"
-    )
-    a.add_argument(
-        "--prefix", default="", help="prefix installed skill names with this"
-    )
 
-    args = parser.parse_args(argv)
+@cli.command("list")
+def list_cmd() -> None:
+    """show declared pins and installed skills"""
+    raise SystemExit(list_declared())
 
-    if args.cmd == "sync":
-        return sync(provision=not args.no_provision)
-    if args.cmd == "list":
-        return list_declared()
-    if args.cmd == "outdated":
-        return outdated()
-    if args.cmd == "add":
-        name = args.name or Path(args.repo).stem.removesuffix("-skills")
-        clone_dir = args.clone or f"repo-skills/{Path(args.repo).stem}"
-        return add(
-            args.repo,
-            name,
+
+@cli.command("outdated")
+def outdated_cmd() -> None:
+    """fetch and report pins that trail their upstream"""
+    raise SystemExit(outdated())
+
+
+@cli.command("add")
+@click.argument("repo")
+@click.option("--name", default=None, help="upstream label (default: repo stem)")
+@click.option(
+    "--clone",
+    default=None,
+    help="directory to clone into (default: repo-skills/<repo stem>)",
+)
+@click.option("--skills-dir", default="", help="clone subdir holding the skills")
+@click.option("--select", default="", help="only skills whose name starts with this")
+@click.option("--prefix", default="", help="prefix installed skill names with this")
+def add_cmd(
+    repo: str,
+    name: str | None,
+    clone: str | None,
+    skills_dir: str,
+    select: str,
+    prefix: str,
+) -> None:
+    """clone a new upstream and print its declaration"""
+    label = name or Path(repo).stem.removesuffix("-skills")
+    clone_dir = clone or f"repo-skills/{Path(repo).stem}"
+    raise SystemExit(
+        add(
+            repo,
+            label,
             clone_dir,
-            skills_dir=args.skills_dir,
-            select=args.select,
-            prefix=args.prefix,
+            skills_dir=skills_dir,
+            select=select,
+            prefix=prefix,
         )
-    return 1
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    cli()

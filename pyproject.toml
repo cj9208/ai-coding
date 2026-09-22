@@ -51,16 +51,16 @@ paddle-gpu = [
 ]
 
 [project.scripts]
-pdf-summarize = "pdf_summarizer.cli:main"
-ai-market-radar = "ai_market_radar.cli:main"
-file-manager = "file_manager.cli:main"
-research-agent = "research_agent.cli:main"
-ocr-backend = "ocr_backend.cli:main"
-ocr-review = "ocr_review.cli:main"
-rag = "rag.cli:main"
-skills = "skill_manager.cli:main"
-orchestrate = "orchestrator.cli:main"
-quant = "quantdesk.cli:main"
+pdf-summarize = "pdf_summarizer.cli:cli"
+ai-market-radar = "ai_market_radar.cli:cli"
+file-manager = "file_manager.cli:cli"
+research-agent = "research_agent.cli:cli"
+ocr-backend = "ocr_backend.cli:cli"
+ocr-review = "ocr_review.cli:cli"
+rag = "rag.cli:cli"
+skills = "skill_manager.cli:cli"
+orchestrate = "orchestrator.cli:cli"
+quant = "quantdesk.cli:cli"
 photos = "photo_desk.cli:main"
 notify = "notify.cli:main"
 

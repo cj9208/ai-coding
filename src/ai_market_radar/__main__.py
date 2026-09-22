@@ -1,6 +1,4 @@
-import sys
-
-from ai_market_radar.cli import main
+from .cli import cli
 
 if __name__ == "__main__":
-    sys.exit(main())
+    cli()

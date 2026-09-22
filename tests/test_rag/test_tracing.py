@@ -12,8 +12,9 @@ import json
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner, Result
 
-from rag.cli import main
+from rag import cli
 from rag.contract import Candidate, Chunk
 from rag.engine import retrieve
 from rag.ingest import OcrBundleAcquirer
@@ -25,6 +26,10 @@ from rag.tracing import (
     TracedPath,
     Tracer,
 )
+
+
+def run(*args: str) -> Result:
+    return CliRunner().invoke(cli.cli, list(args))
 
 
 def _spans(path: Path) -> list[dict]:
@@ -189,58 +194,52 @@ def test_enrich_span_is_async_safe(tmp_path):
 # --- CLI surface --------------------------------------------------------------
 
 
-def test_cli_trace_flag_writes_and_lists(tmp_path, inbox, capsys):
+def test_cli_trace_flag_writes_and_lists(tmp_path, inbox):
     data = tmp_path / "cli-data"
-    assert (
-        main(["--data-dir", str(data), "build", "--inbox", str(inbox), "--trace"]) == 0
-    )
-    out = capsys.readouterr().out
-    assert "trace: " in out
+    result = run("--data-dir", str(data), "build", "--inbox", str(inbox), "--trace")
+    assert result.exit_code == 0, result.output
+    assert "trace: " in result.stdout
     files = list((data / "traces").glob("*.jsonl"))
     assert len(files) == 1
     assert "_build_t-" in files[0].name  # <stamp>_build_<trace_id>.jsonl
 
-    assert main(["--data-dir", str(data), "traces"]) == 0
-    listing = capsys.readouterr().out
-    assert files[0].name in listing
-    assert "rag.build" not in listing  # the list shows one summary line per file
+    listing = run("--data-dir", str(data), "traces")
+    assert listing.exit_code == 0, listing.output
+    assert files[0].name in listing.stdout
+    assert "rag.build" not in listing.stdout  # the list shows one summary line per file
 
-    assert main(["--data-dir", str(data), "traces", files[0].name]) == 0
-    tree = capsys.readouterr().out
-    assert "rag.build" in tree
-    assert "  rag.acquire" in tree  # children are indented under the root
+    tree = run("--data-dir", str(data), "traces", files[0].name)
+    assert tree.exit_code == 0, tree.output
+    assert "rag.build" in tree.stdout
+    assert "  rag.acquire" in tree.stdout  # children are indented under the root
 
 
-def test_cli_query_trace_without_llm(tmp_path, inbox, capsys):
+def test_cli_query_trace_without_llm(tmp_path, inbox):
     data = tmp_path / "cli-data"
-    main(["--data-dir", str(data), "build", "--inbox", str(inbox)])
-    capsys.readouterr()
-    assert (
-        main(
-            [
-                "--data-dir",
-                str(data),
-                "query",
-                "年假审批",
-                "--retrieve-only",
-                "--trace",
-            ]
-        )
-        == 0
+    assert run("--data-dir", str(data), "build", "--inbox", str(inbox)).exit_code == 0
+    queried = run(
+        "--data-dir",
+        str(data),
+        "query",
+        "年假审批",
+        "--retrieve-only",
+        "--trace",
     )
-    assert "trace: " in capsys.readouterr().out
+    assert queried.exit_code == 0, queried.output
+    assert "trace: " in queried.stdout
     (file,) = list((data / "traces").glob("*.jsonl"))
     names = {s["name"] for s in _spans(file)}
     assert {"rag.query", "rag.retrieve", "rag.shape", "rag.path.fts.search"} <= names
 
 
-def test_cli_without_trace_touches_nothing(tmp_path, inbox, capsys):
+def test_cli_without_trace_touches_nothing(tmp_path, inbox):
     data = tmp_path / "cli-data"
-    assert main(["--data-dir", str(data), "build", "--inbox", str(inbox)]) == 0
-    capsys.readouterr()
+    result = run("--data-dir", str(data), "build", "--inbox", str(inbox))
+    assert result.exit_code == 0, result.output
     assert not (data / "traces").exists()
 
 
-def test_traces_command_on_empty_dir(tmp_path, capsys):
-    assert main(["--data-dir", str(tmp_path / "d"), "traces"]) == 0
-    assert "no traces yet" in capsys.readouterr().out
+def test_traces_command_on_empty_dir(tmp_path):
+    result = run("--data-dir", str(tmp_path / "d"), "traces")
+    assert result.exit_code == 0
+    assert "no traces yet" in result.stdout

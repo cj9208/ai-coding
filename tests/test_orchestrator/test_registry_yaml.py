@@ -4,8 +4,9 @@ load_default binds both adapters, and `registry check` reports them."""
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner, Result
 
-from orchestrator.cli import main
+from orchestrator import cli
 from orchestrator.registry import (
     CAPABILITIES_PATH,
     HUMAN_HANDOFF,
@@ -13,6 +14,10 @@ from orchestrator.registry import (
     load_static,
     load_yaml,
 )
+
+
+def run(*args: str) -> Result:
+    return CliRunner().invoke(cli.cli, list(args))
 
 
 def test_default_file_validates_and_selects_rag() -> None:
@@ -81,7 +86,8 @@ def test_static_fixture_view_is_unchanged() -> None:
     assert reg.select("faq_howto") == "echo"  # golden/tests keep the fake world
 
 
-def test_registry_check_cli(tmp_path: Path, capsys) -> None:
-    assert main(["--db", str(tmp_path / "r.db"), "registry", "check"]) == 0
+def test_registry_check_cli(tmp_path: Path) -> None:
+    result = run("--db", str(tmp_path / "r.db"), "registry", "check")
+    assert result.exit_code == 0, result.output
     # 05d step 3: the operator-facing line names the artifact
-    assert "config_hash=" in capsys.readouterr().out
+    assert "config_hash=" in result.stdout

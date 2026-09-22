@@ -1,11 +1,22 @@
-"""Golden-set harness + CLI surface (no LLM anywhere in this file)."""
+"""Golden-set harness + CLI surface (no LLM anywhere in this file).
+
+The click commands report through ``CliRunner``, so the assertions read
+``result.stdout`` (JSON payloads, query output) and ``result.stderr``
+(rejections) instead of capsys.
+"""
 
 from __future__ import annotations
 
 import json
 
-from rag.cli import main
+from click.testing import CliRunner, Result
+
+from rag import cli
 from rag.evaluation import evaluate, load_cases
+
+
+def run(*args: str) -> Result:
+    return CliRunner().invoke(cli.cli, list(args))
 
 
 def test_golden_metrics_on_built_store(built, tmp_path):
@@ -41,35 +52,32 @@ def test_golden_metrics_on_built_store(built, tmp_path):
     assert summary["unresolved_case_ids"] == ["broken-01"]
 
 
-def test_cli_build_status_query_retrieve_only(tmp_path, inbox, capsys):
+def test_cli_build_status_query_retrieve_only(tmp_path, inbox):
     data = tmp_path / "cli-data"
-    assert main(["--data-dir", str(data), "build", "--inbox", str(inbox)]) == 0
-    out = json.loads(capsys.readouterr().out)
+    result = run("--data-dir", str(data), "build", "--inbox", str(inbox))
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
     assert out["chunk_count"] > 0
 
-    assert main(["--data-dir", str(data), "status"]) == 0
-    status = json.loads(capsys.readouterr().out)
-    assert status["active_version"] == 1
+    status = run("--data-dir", str(data), "status")
+    assert status.exit_code == 0, status.output
+    assert json.loads(status.stdout)["active_version"] == 1
 
-    assert main(["--data-dir", str(data), "query", "年假审批", "--retrieve-only"]) == 0
-    printed = capsys.readouterr().out
-    assert "[1]" in printed and "审批" in printed
+    queried = run("--data-dir", str(data), "query", "年假审批", "--retrieve-only")
+    assert queried.exit_code == 0, queried.output
+    assert "[1]" in queried.stdout and "审批" in queried.stdout
 
 
-def test_cli_build_missing_inbox(tmp_path, capsys):
-    assert (
-        main(
-            [
-                "--data-dir",
-                str(tmp_path / "d"),
-                "build",
-                "--inbox",
-                str(tmp_path / "nowhere"),
-            ]
-        )
-        == 1
+def test_cli_build_missing_inbox(tmp_path):
+    result = run(
+        "--data-dir",
+        str(tmp_path / "d"),
+        "build",
+        "--inbox",
+        str(tmp_path / "nowhere"),
     )
-    assert "not found" in capsys.readouterr().err
+    assert result.exit_code == 1
+    assert "not found" in result.stderr
 
 
 def test_corpus_projection_written(built, tmp_path):

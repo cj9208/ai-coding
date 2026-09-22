@@ -78,9 +78,10 @@ def test_cli_screen_end_to_end(
     synth: SimpleNamespace,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from quantdesk import cli
+    from click.testing import CliRunner
+
+    from quantdesk import cli as cli_mod
     from quantdesk.config import DATASETS
 
     wide = synth.make_wide(700, {"WINNERUSDT": 0.002, "LOSERUSDT": -0.001})
@@ -98,7 +99,8 @@ def test_cli_screen_end_to_end(
         frame.write_parquet(leaf / "part-2022-01.parquet")
     monkeypatch.setattr(screen, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(screen, "LEDGER_FILE", tmp_path / "ledger.csv")
-    code = cli.main(
+    result = CliRunner().invoke(
+        cli_mod.cli,
         [
             "screen",
             "--factor",
@@ -117,10 +119,10 @@ def test_cli_screen_end_to_end(
             "skip=5",
             "--set",
             "hold=1",
-        ]
+        ],
     )
-    assert code == 0
-    out = capsys.readouterr().out
+    assert result.exit_code == 0, result.output + repr(result.exception)
+    out = result.output
     assert "stressed-cost verdict" in out and "sealed before" in out
     assert (tmp_path / "ledger.csv").is_file()
     assert list((tmp_path / "runs").glob("csm-*.json"))

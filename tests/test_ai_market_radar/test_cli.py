@@ -8,7 +8,9 @@ digesting, exit behavior) runs for real.
 from contextlib import nullcontext
 from dataclasses import replace
 
+import click
 import pytest
+from click.testing import CliRunner
 
 from ai_market_radar import cli
 from ai_market_radar.models import Item, SourceConfig
@@ -52,7 +54,7 @@ def test_selected_explicit_keys_bypass_enabled_but_reject_unknown():
 
     assert [s.key for s in cli._selected(sources, ["b"])] == ["b"]
 
-    with pytest.raises(SystemExit, match="unknown source key"):
+    with pytest.raises(click.ClickException, match="unknown source key"):
         cli._selected(sources, ["nope"])
 
 
@@ -107,13 +109,14 @@ def test_run_scan_refuses_an_all_disabled_registry(monkeypatch, tmp_path):
         cli, "load_sources", lambda: [replace(_source(), enabled=False)]
     )
 
-    with pytest.raises(SystemExit, match="no sources selected"):
+    with pytest.raises(click.ClickException, match="no sources selected"):
         cli.run_scan(tmp_path, None, 25)
 
 
-def test_main_list_sources_prints_the_real_registry(capsys):
-    assert cli.main(["--list-sources"]) == 0
+def test_cli_list_sources_prints_the_real_registry():
+    result = CliRunner().invoke(cli.cli, ["--list-sources"])
 
-    out = capsys.readouterr().out
+    assert result.exit_code == 0, result.output
+    out = result.stdout
     printed_keys = {line.split()[0] for line in out.splitlines() if line.strip()}
     assert {s.key for s in cli.load_sources()} <= printed_keys

@@ -23,14 +23,25 @@ than an HTTP service, is the first containerization target.
 ``build`` / ``download`` / ``parse`` wrap the repetitive ``docker compose
 -f ... --profile ... run --rm ocr-cpu|ocr-gpu ...`` invocation (see
 :mod:`ocr_backend.container`).
+
+Declaration notes (post-migration from argparse, repo-wide click convention):
+every token and spelling is unchanged — ``download <model>``,
+``parse <file> --out <dir> --device --pipeline-version --model-dir --raw-dir
+--format-block-content``, ``container build|download|parse [--gpu]`` — and the
+model names are still a ``Choice`` on the argument, so a typo fails at parse
+time with the legal list. The ``_fetch`` / ``download`` / ``parse`` functions
+stay module-level (adapters, tests and scripts call them directly); the click
+bodies only map argv onto those and turn their errors into exit codes.
 """
 
 from __future__ import annotations
 
-import argparse
 import shutil
-import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+import click
 
 from . import container
 from .models import MODELS, ModelSpec, is_ready, model_dir
@@ -104,137 +115,145 @@ def parse(
     return json_path
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="ocr-backend", description="provision OCR models and run OCR"
-    )
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
-    d = sub.add_parser(
-        "download", help="fetch a model snapshot into data/ocr_backend/models/"
-    )
-    d.add_argument("model", choices=sorted(MODELS), help="model to download")
-
-    p = sub.add_parser(
-        "parse", help="run OCR over a PDF/image and write the contract JSON"
-    )
-    p.add_argument("source", help="PDF or image file to parse")
-    p.add_argument(
-        "--out", required=True, help="directory to write <stem>.ocr.json/.md into"
-    )
-    p.add_argument(
-        "--device", default=None, help="'cpu' / 'gpu' / 'gpu:0' (default: engine picks)"
-    )
-    p.add_argument("--pipeline-version", default="v1.6")
-    p.add_argument(
-        "--model-dir",
-        default=None,
-        help="override the weights dir (default: repo snapshot if present)",
-    )
-    p.add_argument(
-        "--raw-dir",
-        default=None,
-        help="also save Paddle's own per-page JSON here, for debugging",
-    )
-    p.add_argument(
-        "--format-block-content",
-        action="store_true",
-        help="ask the engine for block-level markdown/HTML/LaTeX formatting",
-    )
-
-    c = sub.add_parser(
-        "container",
-        help="run OCR through the Docker runner instead of in-process",
-    )
-    c_sub = c.add_subparsers(dest="container_cmd", required=True)
-
-    cb = c_sub.add_parser("build", help="docker compose build, one profile")
-    cb.add_argument("--gpu", action="store_true", help="build the GPU image")
-
-    cd = c_sub.add_parser(
-        "download", help="provision a model snapshot inside the container"
-    )
-    cd.add_argument("model", choices=sorted(MODELS), help="model to download")
-    cd.add_argument("--gpu", action="store_true", help="run the GPU image")
-
-    cp = c_sub.add_parser("parse", help="run one document through the container")
-    cp.add_argument(
-        "source",
-        help=f"file to parse — must live under {container.IN_DIR}",
-    )
-    cp.add_argument(
-        "--out",
-        default=None,
-        help=f"output directory under {container.OUT_DIR} (default)",
-    )
-    cp.add_argument("--gpu", action="store_true", help="run the GPU image")
-    cp.add_argument("--device", default=None, help="override cpu/gpu detection")
-    cp.add_argument(
-        "--raw-dir",
-        default=None,
-        help="also save Paddle's own per-page JSON here, for debugging"
-        f" (must live under {container.OUT_DIR})",
-    )
-
-    args = parser.parse_args(argv)
-
-    if args.cmd == "download":
-        dest = download(args.model)
-        if not is_ready(dest):
-            print(
-                f"incomplete snapshot under {dest} — model.safetensors is missing",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"ready: {dest}")
-        return 0
-
-    if args.cmd == "parse":
-        if not Path(args.source).is_file():
-            print(f"source not found: {args.source}", file=sys.stderr)
-            return 1
-        try:
-            parse(
-                args.source,
-                args.out,
-                device=args.device,
-                pipeline_version=args.pipeline_version,
-                model_dir_override=args.model_dir,
-                raw_dir=args.raw_dir,
-                format_block_content=args.format_block_content,
-            )
-        except FileNotFoundError as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
-        return 0
-
-    if args.cmd == "container":
-        return _run_container(args)
-
-    return 1
+@click.group()
+def cli() -> None:
+    """provision OCR models and run OCR"""
 
 
-def _run_container(args: argparse.Namespace) -> int:
-    """Dispatch ``ocr-backend container ...``; Docker-missing is an ordinary
-    error to report, not a Python traceback at the top level."""
+@cli.command("download")
+@click.argument("model", type=click.Choice(sorted(MODELS)))
+def download_cmd(model: str) -> None:
+    """fetch a model snapshot into data/ocr_backend/models/"""
+    dest = download(model)
+    if not is_ready(dest):
+        raise click.ClickException(
+            f"incomplete snapshot under {dest} — model.safetensors is missing"
+        )
+    click.echo(f"ready: {dest}")
+
+
+@cli.command("parse")
+@click.argument("source")
+@click.option(
+    "--out", required=True, help="directory to write <stem>.ocr.json/.md into"
+)
+@click.option(
+    "--device", default=None, help="'cpu' / 'gpu' / 'gpu:0' (default: engine picks)"
+)
+@click.option("--pipeline-version", default="v1.6")
+@click.option(
+    "--model-dir",
+    "model_dir_override",
+    default=None,
+    help="override the weights dir (default: repo snapshot if present)",
+)
+@click.option(
+    "--raw-dir",
+    default=None,
+    help="also save Paddle's own per-page JSON here, for debugging",
+)
+@click.option(
+    "--format-block-content",
+    is_flag=True,
+    help="ask the engine for block-level markdown/HTML/LaTeX formatting",
+)
+def parse_cmd(
+    source: str,
+    out: str,
+    device: str | None,
+    pipeline_version: str,
+    model_dir_override: str | None,
+    raw_dir: str | None,
+    format_block_content: bool,
+) -> None:
+    """run OCR over a PDF/image and write the contract JSON"""
+    if not Path(source).is_file():
+        raise click.ClickException(f"source not found: {source}")
     try:
-        if args.container_cmd == "build":
-            return container.build(gpu=args.gpu)
-        if args.container_cmd == "download":
-            return container.download_model(args.model, gpu=args.gpu)
-        if args.container_cmd == "parse":
-            return container.parse(
-                args.source,
-                out_dir=args.out,
-                raw_dir=args.raw_dir,
-                gpu=args.gpu,
-                device=args.device,
-            )
+        parse(
+            source,
+            out,
+            device=device,
+            pipeline_version=pipeline_version,
+            model_dir_override=model_dir_override,
+            raw_dir=raw_dir,
+            format_block_content=format_block_content,
+        )
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@cli.group("container")
+def container_cli() -> None:
+    """run OCR through the Docker runner instead of in-process"""
+
+
+def _docker(fn: Callable[..., int], *args: Any, **kwargs: Any) -> int:
+    """Call a :mod:`ocr_backend.container` wrapper: Docker-missing is an
+    ordinary error to report, not a Python traceback at the top level."""
+    try:
+        return fn(*args, **kwargs)
     except (RuntimeError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    return 1
+        raise click.ClickException(str(exc)) from exc
+
+
+@container_cli.command("build")
+@click.option("--gpu", is_flag=True, help="build the GPU image")
+def container_build(gpu: bool) -> None:
+    """docker compose build, one profile"""
+    raise SystemExit(_docker(container.build, gpu=gpu))
+
+
+@container_cli.command("download")
+@click.argument("model", type=click.Choice(sorted(MODELS)))
+@click.option("--gpu", is_flag=True, help="run the GPU image")
+def container_download(model: str, gpu: bool) -> None:
+    """provision a model snapshot inside the container"""
+    raise SystemExit(_docker(container.download_model, model, gpu=gpu))
+
+
+@container_cli.command(
+    "parse",
+    # Explicit help instead of a docstring: the mounted input directory is
+    # derived from REPO_ROOT, so the text cannot be a static docstring (and
+    # click arguments take no help= of their own).
+    help=(
+        "run one document through the container — SOURCE must live under "
+        f"{container.IN_DIR}"
+    ),
+)
+@click.argument("source")
+@click.option(
+    "--out",
+    default=None,
+    help=f"output directory under {container.OUT_DIR} (default)",
+)
+@click.option("--gpu", is_flag=True, help="run the GPU image")
+@click.option("--device", default=None, help="override cpu/gpu detection")
+@click.option(
+    "--raw-dir",
+    default=None,
+    help="also save Paddle's own per-page JSON here, for debugging"
+    f" (must live under {container.OUT_DIR})",
+)
+def container_parse(
+    source: str,
+    out: str | None,
+    gpu: bool,
+    device: str | None,
+    raw_dir: str | None,
+) -> None:
+    raise SystemExit(
+        _docker(
+            container.parse,
+            source,
+            out_dir=out,
+            raw_dir=raw_dir,
+            gpu=gpu,
+            device=device,
+        )
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    cli()

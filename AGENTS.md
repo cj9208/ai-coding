@@ -36,7 +36,14 @@ the others, except where noted below.
 - CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`,
   `research-agent`, `ocr-backend`, `ocr-review`, `rag`, `skills`, `orchestrate`,
   `quant`, `photos`, `notify`
-  (`[project.scripts]`). `skills` is the one owner of vendored AI skills —
+  (`[project.scripts]`). All CLIs are declared with **click** since 2026-09-23
+  (no argparse, no `main(argv)` shim): scripts point at the click object — a
+  `@click.group` (`cli`) or, for single-command tools (pdf_summarizer,
+  ai_market_radar, file_manager), a `@click.command` (`cli`); tests invoke via
+  `click.testing.CliRunner`; keep CLI tokens compatible with the 03-usage
+  docs, and reference `src/quantdesk/cli.py` for the house pattern.
+  (`photos` / `notify` are the argparse holdouts, owned by other work.)
+  `skills` is the one owner of vendored AI skills —
   `sync` / `list` / `outdated` / `add` (see "AI skills & specs").
   `ocr-backend` has three subcommands: `download <model>` (provisions a
   snapshot), `parse <file> --out <dir>` (one-shot OCR runner entry point —

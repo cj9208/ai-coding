@@ -1,10 +1,16 @@
 """``ocr-backend container`` tests — the Docker wrapper's command building and
 path mapping, with ``subprocess.run`` and ``shutil.which`` faked. Never shells
-out to a real Docker, and never builds an image."""
+out to a real Docker, and never builds an image. The ``container`` click
+commands are driven through ``CliRunner`` for the same reason."""
 
 import pytest
+from click.testing import CliRunner, Result
 
 from ocr_backend import cli, container
+
+
+def run(*args: str) -> Result:
+    return CliRunner().invoke(cli.cli, list(args))
 
 
 class _FakeRun:
@@ -140,11 +146,9 @@ def test_cli_container_parse_forwards_raw_dir(monkeypatch, tmp_path):
 
     monkeypatch.setattr(container, "parse", fake_parse)
 
-    rc = cli.main(
-        ["container", "parse", str(tmp_path / "scan.pdf"), "--raw-dir", "raw"]
-    )
+    result = run("container", "parse", str(tmp_path / "scan.pdf"), "--raw-dir", "raw")
 
-    assert rc == 0
+    assert result.exit_code == 0, result.output + repr(result.exception)
     assert seen["raw_dir"] == "raw"
 
 
@@ -167,18 +171,18 @@ def test_download_model_runs_the_containerized_download(fake_run):
 
 
 def test_cli_container_build_dispatches_to_the_wrapper(fake_run):
-    rc = cli.main(["container", "build", "--gpu"])
-    assert rc == 0
+    result = run("container", "build", "--gpu")
+    assert result.exit_code == 0
     assert fake_run.calls[0][-1] == "ocr-gpu"
 
 
-def test_cli_container_reports_docker_errors_as_exit_1(monkeypatch, capsys):
+def test_cli_container_reports_docker_errors_as_exit_1(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("docker is not on PATH")
 
     monkeypatch.setattr(container, "build", boom)
 
-    rc = cli.main(["container", "build"])
+    result = run("container", "build")
 
-    assert rc == 1
-    assert "docker is not on PATH" in capsys.readouterr().err
+    assert result.exit_code == 1
+    assert "docker is not on PATH" in result.stderr

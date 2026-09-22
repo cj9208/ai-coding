@@ -4,7 +4,7 @@
     rag ingest [--inbox DIR] [--limit N]            # stage new/changed docs
     rag publish                                     # diff transaction
     rag enrich [--limit N] [--prompt-ver V]         # LLM-annotate unenriched chunks
-    rag retract <doc_id>                            # mark for removal
+    rag retract <doc_id>                            # mark for removal at next publish
     rag gc [--keep N]                               # prune old snapshots
     rag status
     rag query "年假超过几天需要审批？" [-k 5] [--retrieve-only]
@@ -20,315 +20,312 @@ in the offline pipeline and runs as an independent background step;
 ``query`` is the online pipeline; ``eval`` is the measurement harness —
 see ``docs/rag/02-implementation.md`` for what each stage guarantees and
 ``docs/rag/03-usage.md`` for the full CLI reference.
+
+Declaration notes (post-migration from argparse, repo-wide click convention):
+``--data-dir`` stays a *group* option, so it is spelled before the
+subcommand exactly as the usage doc shows. Every token in
+``docs/rag/03-usage.md`` survived the move unchanged, including the single
+dash ``-k`` / ``-n``. A missing ``--inbox`` is rejected at parse time via
+``click.ClickException`` — same stderr + exit 1 the old
+``raise SystemExit("error: ...")`` produced, with click's ``Error: `` prefix.
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
-import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+import click
 
 from storage import SqliteCache
 from utils.paths import data_dir as default_data_dir
 
+from . import pipeline
 from .answer import generate
-from .contract import Outcome
+from .contract import EvidencePack, Outcome
 from .engine import retrieve
 from .evaluation import evaluate, load_cases
-from .pipeline import build, ingest, publish
 from .store import RagStore
 from .tracing import Tracer, load_trace, render_tree
 
+TRACE_HELP = "record this run's spans to <data-dir>/traces/ as JSONL"
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="rag", description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--data-dir",
-        type=Path,
-        default=default_data_dir("rag"),
-        help="project data directory (default: repo-root data/rag)",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
 
-    p_build = sub.add_parser("build", help="offline: ingest -> chunk -> publish")
-    p_build.add_argument(
+def _default_inbox() -> Path:
+    return default_data_dir("ocr_backend") / "out"
+
+
+def _check_inbox(ctx: Any, param: Any, value: Path) -> Path:
+    """Fail before the first bundle is read, not halfway through a run."""
+    del ctx, param
+    if not value.is_dir():
+        raise click.ClickException(f"inbox directory not found: {value}")
+    return value
+
+
+def inbox_option(f: Callable[..., Any]) -> Callable[..., Any]:
+    """``--inbox`` as build and ingest both spell it."""
+    return click.option(
         "--inbox",
         type=Path,
-        default=default_data_dir("ocr_backend") / "out",
+        default=_default_inbox,
+        callback=_check_inbox,
         help="directory of *.ocr.json bundles from `ocr-backend parse`",
-    )
-
-    p_ingest = sub.add_parser("ingest", help="stage new/changed docs from inbox")
-    p_ingest.add_argument(
-        "--inbox",
-        type=Path,
-        default=default_data_dir("ocr_backend") / "out",
-        help="directory of *.ocr.json bundles from `ocr-backend parse`",
-    )
-    p_ingest.add_argument(
-        "--limit",
-        type=int,
-        default=0,
-        help="stop after N bundles (0 = no limit)",
-    )
-
-    sub.add_parser("publish", help="run the diff transaction (staged -> active)")
-
-    p_enrich = sub.add_parser(
-        "enrich", help="LLM-annotate unenriched chunks (independent background step)"
-    )
-    p_enrich.add_argument(
-        "--limit",
-        type=int,
-        default=0,
-        help="stop after N chunks (0 = no limit)",
-    )
-    p_enrich.add_argument(
-        "--prompt-ver",
-        default=None,
-        help="prompt version tag (default: versions.PROMPT_VER)",
-    )
-    p_enrich.add_argument(
-        "--workers",
-        type=int,
-        default=4,
-        help="concurrent LLM calls (default: 4)",
-    )
-
-    p_retract = sub.add_parser("retract", help="mark a doc for removal at next publish")
-    p_retract.add_argument("doc_id", help="document id to retract")
-
-    p_gc = sub.add_parser("gc", help="prune old snapshots and orphaned chunks")
-    p_gc.add_argument(
-        "--keep",
-        type=int,
-        default=3,
-        help="retain the N most recent snapshots (default: 3)",
-    )
-
-    sub.add_parser("status", help="documents, snapshots, active version")
-
-    p_query = sub.add_parser("query", help="online: retrieve (+ grounded answer)")
-    p_query.add_argument("question")
-    p_query.add_argument("-k", type=int, default=5)
-    p_query.add_argument(
-        "--retrieve-only",
-        action="store_true",
-        help="print the evidence pack and skip the LLM call",
-    )
-
-    p_eval = sub.add_parser("eval", help="run a golden set against retrieval")
-    p_eval.add_argument("golden", type=Path)
-    p_eval.add_argument("-k", type=int, default=5)
-
-    p_traces = sub.add_parser(
-        "traces", help="list recorded runs; with FILE, render that trace as a tree"
-    )
-    p_traces.add_argument(
-        "file", nargs="?", help="trace JSONL (path or substring of a listed name)"
-    )
-    p_traces.add_argument("-n", type=int, default=10, help="how many to list")
-
-    for sp in (p_build, p_ingest, p_query, p_eval):
-        sp.add_argument(
-            "--trace",
-            action="store_true",
-            help="record this run's spans to <data-dir>/traces/ as JSONL",
-        )
-    return parser
+    )(f)
 
 
-def _tracer(args: argparse.Namespace) -> Tracer:
-    if not getattr(args, "trace", False):
+def trace_option(f: Callable[..., Any]) -> Callable[..., Any]:
+    """``--trace`` on the four commands that run the pipeline."""
+    return click.option("--trace", is_flag=True, help=TRACE_HELP)(f)
+
+
+def _tracer(data_dir: Path, run: str, trace: bool) -> Tracer:
+    if not trace:
         return Tracer.disabled()
-    return Tracer(args.data_dir / "traces", run=args.command)
+    return Tracer(data_dir / "traces", run=run)
 
 
 def _report_trace(path: Path | None) -> None:
     if path is not None:
-        print(f"\ntrace: {path}")
+        click.echo(f"\ntrace: {path}")
 
 
-def _cmd_build(args: argparse.Namespace) -> int:
-    tracer = _tracer(args)
+def _echo_json(payload: Any) -> None:
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@click.group()
+@click.option(
+    "--data-dir",
+    type=Path,
+    default=default_data_dir("rag"),
+    help="project data directory (default: repo-root data/rag)",
+)
+@click.pass_context
+def cli(ctx: click.Context, data_dir: Path) -> None:
+    """the knowledge pipeline over OCR output: build / query / eval / status"""
+    ctx.obj = data_dir
+
+
+@cli.command()
+@inbox_option
+@trace_option
+@click.pass_obj
+def build(data_dir: Path, inbox: Path, trace: bool) -> None:
+    """offline: ingest -> chunk -> publish"""
+    tracer = _tracer(data_dir, "build", trace)
     try:
-        report = build(args.inbox, args.data_dir, tracer=tracer)
+        report = pipeline.build(inbox, data_dir, tracer=tracer)
     finally:
         _report_trace(tracer.close())
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0 if not report["errors"] else 1
+    _echo_json(report)
+    raise SystemExit(0 if not report["errors"] else 1)
 
 
-def _cmd_ingest(args: argparse.Namespace) -> int:
-    tracer = _tracer(args)
+@cli.command()
+@inbox_option
+@click.option(
+    "--limit", type=int, default=0, help="stop after N bundles (0 = no limit)"
+)
+@trace_option
+@click.pass_obj
+def ingest(data_dir: Path, inbox: Path, limit: int, trace: bool) -> None:
+    """stage new/changed docs from inbox"""
+    tracer = _tracer(data_dir, "ingest", trace)
     try:
-        report = ingest(
-            args.inbox,
-            args.data_dir,
-            limit=args.limit,
-            tracer=tracer,
-        )
+        report = pipeline.ingest(inbox, data_dir, limit=limit, tracer=tracer)
     finally:
         _report_trace(tracer.close())
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0 if not report["errors"] else 1
+    _echo_json(report)
+    raise SystemExit(0 if not report["errors"] else 1)
 
 
-def _cmd_publish(args: argparse.Namespace) -> int:
-    report = publish(args.data_dir)
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0
+@cli.command()
+@click.pass_obj
+def publish(data_dir: Path) -> None:
+    """run the diff transaction (staged -> active)"""
+    _echo_json(pipeline.publish(data_dir))
 
 
-def _cmd_enrich(args: argparse.Namespace) -> int:
+@cli.command()
+@click.option("--limit", type=int, default=0, help="stop after N chunks (0 = no limit)")
+@click.option(
+    "--prompt-ver",
+    default=None,
+    help="prompt version tag (default: versions.PROMPT_VER)",
+)
+@click.option(
+    "--workers", type=int, default=4, help="concurrent LLM calls (default: 4)"
+)
+@click.pass_obj
+def enrich(data_dir: Path, limit: int, prompt_ver: str | None, workers: int) -> None:
+    """LLM-annotate unenriched chunks (independent background step)"""
     from .enrich import enrich_corpus
     from .versions import PROMPT_VER
 
-    prompt_ver = args.prompt_ver or PROMPT_VER
     report = enrich_corpus(
-        args.data_dir,
-        limit=args.limit,
-        prompt_ver=prompt_ver,
-        workers=args.workers,
+        data_dir,
+        limit=limit,
+        prompt_ver=prompt_ver or PROMPT_VER,
+        workers=workers,
     )
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 1 if report["errors"] else 0
+    _echo_json(report)
+    raise SystemExit(1 if report["errors"] else 0)
 
 
-def _cmd_retract(args: argparse.Namespace) -> int:
-    store = RagStore(args.data_dir / "kb.db")
-    store.retract(args.doc_id)
-    print(f"retracted: {args.doc_id}")
+@cli.command()
+@click.argument("doc_id")
+@click.pass_obj
+def retract(data_dir: Path, doc_id: str) -> None:
+    """mark a doc for removal at next publish"""
+    store = RagStore(data_dir / "kb.db")
+    store.retract(doc_id)
+    click.echo(f"retracted: {doc_id}")
     store.dispose()
-    return 0
 
 
-def _cmd_gc(args: argparse.Namespace) -> int:
-    store = RagStore(args.data_dir / "kb.db")
-    result = store.gc(keep=args.keep)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+@cli.command()
+@click.option(
+    "--keep",
+    type=int,
+    default=3,
+    help="retain the N most recent snapshots (default: 3)",
+)
+@click.pass_obj
+def gc(data_dir: Path, keep: int) -> None:
+    """prune old snapshots and orphaned chunks"""
+    store = RagStore(data_dir / "kb.db")
+    _echo_json(store.gc(keep=keep))
     store.dispose()
-    return 0
 
 
-def _cmd_status(args: argparse.Namespace) -> int:
-    store = RagStore(args.data_dir / "kb.db")
-    print(json.dumps(store.status(), ensure_ascii=False, indent=2))
+@cli.command()
+@click.pass_obj
+def status(data_dir: Path) -> None:
+    """documents, snapshots, active version"""
+    store = RagStore(data_dir / "kb.db")
+    _echo_json(store.status())
     store.dispose()
-    return 0
 
 
-def _print_pack(pack) -> None:  # noqa: ANN001
-    print(
+def _print_pack(pack: EvidencePack) -> None:
+    click.echo(
         f"— {pack.strength.get('n_candidates', 0)} candidates "
         f"(best fts score: {pack.strength.get('best_score')})"
     )
     if pack.insufficient:
-        print("! insufficient evidence:", "; ".join(pack.notes))
+        click.echo("! insufficient evidence: " + "; ".join(pack.notes))
     for i, chunk in enumerate(pack.chunks, start=1):
         first_line = chunk.text.strip().splitlines()[0] if chunk.text else ""
-        print(
+        click.echo(
             f"[{i}] {chunk.chunk_id} ({chunk.chunk_type}) "
             f"{chunk.section_path or '/'} :: {first_line[:70]}"
         )
     if pack.parents:
-        print(f"  ({len(pack.parents)} parent section(s) attached as context)")
+        click.echo(f"  ({len(pack.parents)} parent section(s) attached as context)")
 
 
-def _cmd_query(args: argparse.Namespace) -> int:
-    tracer = _tracer(args)
-    store = RagStore(args.data_dir / "kb.db")
-    cache = SqliteCache(args.data_dir / "cache.db")
+@cli.command()
+@click.argument("question")
+@click.option("-k", type=int, default=5)
+@click.option(
+    "--retrieve-only",
+    is_flag=True,
+    help="print the evidence pack and skip the LLM call",
+)
+@trace_option
+@click.pass_obj
+def query(
+    data_dir: Path, question: str, k: int, retrieve_only: bool, trace: bool
+) -> None:
+    """online: retrieve (+ grounded answer)"""
+    tracer = _tracer(data_dir, "query", trace)
+    store = RagStore(data_dir / "kb.db")
+    cache = SqliteCache(data_dir / "cache.db")
     rc = 0
     try:
-        with tracer.span("rag.query", question=args.question[:120]):
-            pack = retrieve(store, args.question, k=args.k, tracer=tracer, cache=cache)
+        with tracer.span("rag.query", question=question[:120]):
+            pack = retrieve(store, question, k=k, tracer=tracer, cache=cache)
             _print_pack(pack)
-            if not args.retrieve_only:
+            if not retrieve_only:
                 with tracer.span(
                     "gen_ai.completion", **{"gen_ai.operation.name": "chat"}
                 ) as csp:
-                    answer = asyncio.run(generate(pack, args.question))
+                    answer = asyncio.run(generate(pack, question))
                     csp.set(outcome=answer.outcome.value, n_claims=len(answer.claims))
-                print()
-                print(f"outcome: {answer.outcome.value}")
+                click.echo()
+                click.echo(f"outcome: {answer.outcome.value}")
                 if answer.text:
-                    print(answer.text)
+                    click.echo(answer.text)
                 for claim in answer.claims:
                     refs = ", ".join(f"[{r}]" for r in claim.refs) or "(no citation)"
-                    print(f"  • {claim.text}  ← {refs}")
+                    click.echo(f"  • {claim.text}  ← {refs}")
                 if answer.clarification:
-                    print(f"clarification: {answer.clarification}")
+                    click.echo(f"clarification: {answer.clarification}")
                 if answer.notes:
-                    print(f"notes: {answer.notes}")
+                    click.echo(f"notes: {answer.notes}")
                 rc = 0 if answer.outcome in (Outcome.answered, Outcome.partial) else 2
     finally:
         cache.close()
         store.dispose()
         _report_trace(tracer.close())
-    return rc
+    raise SystemExit(rc)
 
 
-def _cmd_eval(args: argparse.Namespace) -> int:
-    tracer = _tracer(args)
-    store = RagStore(args.data_dir / "kb.db")
-    cases = load_cases(args.golden)
+@cli.command("eval")
+@click.argument("golden", type=Path)
+@click.option("-k", type=int, default=5)
+@trace_option
+@click.pass_obj
+def eval_cmd(data_dir: Path, golden: Path, k: int, trace: bool) -> None:
+    """run a golden set against retrieval"""
+    tracer = _tracer(data_dir, "eval", trace)
+    store = RagStore(data_dir / "kb.db")
+    cases = load_cases(golden)
     try:
-        summary = evaluate(store, cases, k=args.k, tracer=tracer)
+        summary = evaluate(store, cases, k=k, tracer=tracer)
     finally:
         store.dispose()
         _report_trace(tracer.close())
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-    return 0 if not summary["unresolved_case_ids"] else 1
+    _echo_json(summary)
+    raise SystemExit(0 if not summary["unresolved_case_ids"] else 1)
 
 
-def _cmd_traces(args: argparse.Namespace) -> int:
-    traces_dir = args.data_dir / "traces"
+@cli.command()
+@click.argument("file", required=False, default=None)
+@click.option("-n", type=int, default=10, help="how many to list")
+@click.pass_obj
+def traces(data_dir: Path, file: str | None, n: int) -> None:
+    """list recorded runs; with FILE, render that trace as a tree"""
+    traces_dir = data_dir / "traces"
     files = (
         sorted(traces_dir.glob("*.jsonl"), reverse=True) if traces_dir.is_dir() else []
     )
-    if args.file:
-        target = Path(args.file)
+    if file:
+        target = Path(file)
         if not target.is_file():
-            matches = [f for f in files if args.file in f.name]
+            matches = [f for f in files if file in f.name]
             if not matches:
-                print(f"error: no trace matching {args.file!r}", file=sys.stderr)
-                return 1
+                click.echo(f"error: no trace matching {file!r}", err=True)
+                raise SystemExit(1)
             target = matches[0]
-        print(render_tree(load_trace(target)))
-        return 0
+        click.echo(render_tree(load_trace(target)))
+        return
     if not files:
-        print("no traces yet — run build/query/eval with --trace")
-        return 0
-    for f in files[: args.n]:
+        click.echo("no traces yet — run build/query/eval with --trace")
+        return
+    for f in files[:n]:
         spans = load_trace(f)
         root = spans[0] if spans else None
         total = root.duration_ms if root else "?"
         bad = any(s.status != "ok" for s in spans)
-        print(f"{f.name}  {len(spans)} span(s)  {total} ms{'  [error]' if bad else ''}")
-    return 0
+        click.echo(
+            f"{f.name}  {len(spans)} span(s)  {total} ms{'  [error]' if bad else ''}"
+        )
 
 
-_COMMANDS = {
-    "build": _cmd_build,
-    "ingest": _cmd_ingest,
-    "publish": _cmd_publish,
-    "enrich": _cmd_enrich,
-    "retract": _cmd_retract,
-    "gc": _cmd_gc,
-    "status": _cmd_status,
-    "query": _cmd_query,
-    "eval": _cmd_eval,
-    "traces": _cmd_traces,
-}
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    inbox = getattr(args, "inbox", None)
-    if inbox is not None and not inbox.is_dir():
-        print(f"error: inbox directory not found: {inbox}", file=sys.stderr)
-        return 1
-    return _COMMANDS[args.command](args)
+if __name__ == "__main__":
+    cli()

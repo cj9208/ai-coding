@@ -38,6 +38,14 @@ the four remaining questions are recorded as resolved-as-deferred in
 
 ## Verification owed (blocked on this machine)
 
+- [ ] **click migration: regenerate the console scripts, then smoke the exes.**
+      The 2026-09-23 argparse→click switch repointed `[project.scripts]` at the
+      `:cli` objects, but the installed `.venv/Scripts/*.exe` wrappers still
+      import the removed `main` — they raise ImportError until reinstalled
+      (`python -m <pkg>.cli` works meanwhile). Same locked `photos.exe` blocks
+      this as the notify item below: stop the photo server, `uv sync`, smoke
+      `uv run quant --help` + `uv run skills list`. Fold `photos` and `notify`
+      into click when they migrate (AGENTS.md lists them as the two holdouts).
 - [ ] **Build the OCR runner image and run one real parse** (Docker Desktop,
       WSL2 backend): `ocr-backend container build` →
       `ocr-backend container download paddleocr-vl-1.6` →

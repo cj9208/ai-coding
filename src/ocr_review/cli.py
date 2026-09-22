@@ -8,13 +8,20 @@
 ``serve`` is the long-lived entry (deployment box for business colleagues);
 ``add`` is a one-shot that only builds the workspace (page raster + meta),
 so the document shows up in the list even with an unusual file layout.
+
+Declaration notes (post-migration from argparse, repo-wide click convention):
+tokens are unchanged — ``--work-root`` is still a group option that goes
+*before* the subcommand, and ``add <pdf> --ocr <json>`` / ``serve --inbox
+--host --port`` keep their spellings. ``add`` stays a module-level function
+(callers build a workspace without going through argv); the click bodies only
+map arguments onto it and turn its errors into exit codes.
 """
 
 from __future__ import annotations
 
-import argparse
-import sys
 from pathlib import Path
+
+import click
 
 from ocr_backend.contract import OcrDocument
 
@@ -45,56 +52,52 @@ def add(pdf: str | Path, ocr_json: str | Path, work_root: Path) -> Path:
     return ws.root
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="ocr-review", description="human proofreading UI for OcrDocument JSON"
-    )
-    parser.add_argument(
-        "--work-root",
-        default=WORK_ROOT_DEFAULT,
-        type=Path,
-        help="workspace store (default: %(default)s)",
-    )
-    sub = parser.add_subparsers(dest="cmd", required=True)
+@click.group()
+@click.option(
+    "--work-root",
+    default=WORK_ROOT_DEFAULT,
+    type=click.Path(path_type=Path),
+    show_default=True,
+    help="workspace store",
+)
+@click.pass_context
+def cli(ctx: click.Context, work_root: Path) -> None:
+    """human proofreading UI for OcrDocument JSON"""
+    ctx.obj = work_root
 
-    s = sub.add_parser("serve", help="serve the review UI")
-    s.add_argument(
-        "--inbox",
-        default=INBOX_DEFAULT,
-        type=Path,
-        help="directory of parse bundles to list (default: %(default)s)",
-    )
-    s.add_argument("--host", default="127.0.0.1")
-    s.add_argument("--port", type=int, default=8765)
 
-    a = sub.add_parser("add", help="register a (pdf, ocr.json) pair as a workspace")
-    a.add_argument("pdf")
-    a.add_argument("--ocr", required=True, help="contract JSON for that pdf")
+@cli.command("serve")
+@click.option(
+    "--inbox",
+    default=INBOX_DEFAULT,
+    type=click.Path(path_type=Path),
+    show_default=True,
+    help="directory of parse bundles to list",
+)
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", type=int, default=8765, show_default=True)
+@click.pass_obj
+def serve_cmd(work_root: Path, inbox: Path, host: str, port: int) -> None:
+    """serve the review UI"""
+    import uvicorn
 
-    args = parser.parse_args(argv)
+    from .app import create_app
 
-    if args.cmd == "add":
-        try:
-            add(args.pdf, args.ocr, Path(args.work_root))
-        except (FileNotFoundError, ValueError) as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
-        return 0
+    # Deferred so that `add` (and --help) work without uvicorn/fastapi loaded.
+    uvicorn.run(create_app(inbox, work_root), host=host, port=port)
 
-    if args.cmd == "serve":
-        import uvicorn
 
-        from .app import create_app
-
-        uvicorn.run(
-            create_app(Path(args.inbox), Path(args.work_root)),
-            host=args.host,
-            port=args.port,
-        )
-        return 0
-
-    return 1
+@cli.command("add")
+@click.argument("pdf")
+@click.option("--ocr", required=True, help="contract JSON for that pdf")
+@click.pass_obj
+def add_cmd(work_root: Path, pdf: str, ocr: str) -> None:
+    """register a (pdf, ocr.json) pair as a workspace"""
+    try:
+        add(pdf, ocr, work_root)
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    cli()

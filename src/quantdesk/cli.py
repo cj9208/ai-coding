@@ -1,4 +1,4 @@
-"""``quant`` CLI — the one entry point of the research data plane.
+"""``quant`` CLI — the one entry point of the research data plane (click).
 
     quant download --datasets um_klines_1m --symbols BTCUSDT \
                    --since 2024-01 --until 2024-12       # diff-sync archives
@@ -15,14 +15,21 @@
 download/convert are pure "make local match the requested range"
 commands — rerunning them is a no-op, matching the house posture that
 provisioning is an idempotent CLI subcommand, not a shell script.
+
+Declaration notes (post-migration from argparse, repo-wide click convention):
+csv spellings like ``--datasets a,b`` are kept as the documented interface;
+validation happens at parse time via callbacks, so a bad dataset name fails
+with the legal list instead of mid-run.
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
-import sys
+from collections.abc import Callable
 from datetime import date, timedelta
+from typing import Any
+
+import click
 
 from utils.paths import REPO_ROOT
 
@@ -30,7 +37,8 @@ from . import archive
 from . import convert as convert_mod
 from . import record
 from . import screen as screen_mod
-from . import store, universe
+from . import store
+from . import universe as universe_mod
 from .config import DATASETS, parse_csv_list
 
 
@@ -39,122 +47,230 @@ def _default_until() -> str:
     return last_month.strftime("%Y-%m")
 
 
-def _resolve_datasets(spec: str) -> list[str]:
-    names = parse_csv_list(spec)
-    unknown = [n for n in names if n not in DATASETS]
-    if unknown:
-        raise SystemExit(
-            f"unknown dataset(s): {', '.join(unknown)}; "
-            f"available: {', '.join(sorted(DATASETS))}"
-        )
-    return names
+def _csv_list(ctx: Any, param: Any, value: str) -> list[str]:
+    """Split the documented csv spelling into a list at parse time."""
+    return parse_csv_list(value)
 
 
-def _resolve_symbols(args: argparse.Namespace) -> list[str]:
-    if args.symbols:
-        return parse_csv_list(args.symbols)
-    if args.top:
-        snap = universe.latest(args.market)
+def _csv_choices(names: tuple[str, ...]) -> Callable[..., list[str]]:
+    """A csv list whose every value must be one of ``names`` — validated
+    before any command body runs."""
+
+    def cb(ctx: Any, param: Any, value: str) -> list[str]:
+        picked = parse_csv_list(value)
+        unknown = [n for n in picked if n not in names]
+        if unknown:
+            raise click.BadParameter(
+                f"unknown: {', '.join(unknown)}; available: {', '.join(sorted(names))}"
+            )
+        return picked
+
+    return cb
+
+
+def _resolve_symbols(symbols: list[str], top: int, market: str) -> list[str]:
+    if symbols:
+        return symbols
+    if top:
+        snap = universe_mod.latest(market)
         if snap is None:
-            raise SystemExit("no universe snapshot — run `quant universe sync`")
-        return snap.symbols[: args.top]
-    raise SystemExit("pass --symbols or --top N")
+            raise click.ClickException(
+                "no universe snapshot — run `quant universe sync`"
+            )
+        return snap.symbols[:top]
+    raise click.UsageError("pass --symbols or --top N")
 
 
-def cmd_download(args: argparse.Namespace) -> int:
-    symbols = _resolve_symbols(args)
+def range_options(f: Callable[..., Any]) -> Callable[..., Any]:
+    """Options shared by download and convert."""
+    f = click.option(
+        "--datasets",
+        type=str,
+        required=True,
+        callback=_csv_choices(tuple(DATASETS)),
+        metavar="CSV",
+        help="csv of dataset names",
+    )(f)
+    f = click.option(
+        "--symbols", default="", callback=_csv_list, help="csv of symbols"
+    )(f)
+    f = click.option("--market", type=click.Choice(["spot", "um"]), default="um")(f)
+    f = click.option(
+        "--top",
+        type=int,
+        default=0,
+        help="first N from the latest universe snapshot (requires quant universe sync)",
+    )(f)
+    f = click.option("--since", required=True, help="YYYY-MM")(f)
+    f = click.option("--until", default="", help="YYYY-MM (default: last month)")(f)
+    return f
+
+
+@click.group()
+def cli() -> None:
+    """research data plane over the Binance public archive"""
+
+
+@cli.command()
+@range_options
+@click.option(
+    "--daily/--no-daily",
+    default=True,
+    help="daily files for the not-yet-published current month",
+)
+@click.option(
+    "--refresh",
+    is_flag=True,
+    help="re-check upstream checksums and act on replacements",
+)
+def download(
+    datasets: list[str],
+    symbols: list[str],
+    market: str,
+    top: int,
+    since: str,
+    until: str,
+    daily: bool,
+    refresh: bool,
+) -> None:
+    """diff-sync archives into raw/ + inventory"""
+    resolved = _resolve_symbols(symbols, top, market)
     counts = {"fetched": 0, "skipped": 0, "replaced": 0, "missing": 0}
-    for name in _resolve_datasets(args.datasets):
+    for name in datasets:
         actions = archive.download(
             DATASETS[name],
-            symbols,
-            args.since,
-            args.until or _default_until(),
-            include_daily=not args.no_daily,
-            refresh_remote=args.refresh,
+            resolved,
+            since,
+            until or _default_until(),
+            include_daily=daily,
+            refresh_remote=refresh,
         )
         for action in actions:
             counts[action.outcome] = counts.get(action.outcome, 0) + 1
     summary = "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
-    print(f"download: {summary}")
-    return 0
+    click.echo(f"download: {summary}")
 
 
-def cmd_convert(args: argparse.Namespace) -> int:
-    symbols = _resolve_symbols(args)
-    until = args.until or _default_until()
+@cli.command()
+@range_options
+def convert(
+    datasets: list[str],
+    symbols: list[str],
+    market: str,
+    top: int,
+    since: str,
+    until: str,
+) -> None:
+    """build Parquet month partitions from raw"""
+    resolved = _resolve_symbols(symbols, top, market)
+    until = until or _default_until()
     built = 0
-    for name in _resolve_datasets(args.datasets):
+    for name in datasets:
         dataset = DATASETS[name]
-        for symbol in symbols:
-            for month in archive.months_between(args.since, until):
+        for symbol in resolved:
+            for month in archive.months_between(since, until):
                 result = convert_mod.convert_month(dataset, symbol, month)
                 if result:
                     built += 1
-                    print(
+                    click.echo(
                         f"built {result.dataset}/{result.symbol}/{result.month}"
                         f" rows={result.rows} from {result.source}"
                     )
-    print(f"convert: {built} month-partitions (re)built")
-    return 0
+    click.echo(f"convert: {built} month-partitions (re)built")
 
 
-def cmd_list(_: argparse.Namespace) -> int:
+@cli.command("list")
+def list_cmd() -> None:
+    """coverage of built partitions"""
     rows = store.scan_coverage()
     if not rows:
-        print("no parquet partitions yet — run quant download + quant convert")
-        return 0
-    print(f"{'dataset':<16} {'symbol':<12} {'months':<18} {'count':>5} rows")
+        click.echo("no parquet partitions yet — run quant download + quant convert")
+        return
+    click.echo(f"{'dataset':<16} {'symbol':<12} {'months':<18} {'count':>5} rows")
     for row in rows:
-        print(
+        click.echo(
             f"{row.dataset:<16} {row.symbol:<12} {row.span:<18} "
             f"{len(row.months):>5} {row.rows}"
         )
-    return 0
 
 
-def cmd_verify(args: argparse.Namespace) -> int:
-    issues = store.verify(remote=args.remote)
+@cli.command()
+@click.option(
+    "--remote",
+    is_flag=True,
+    help="also re-check every inventory file's upstream checksum",
+)
+def verify(remote: bool) -> None:
+    """local hashes, time-grid continuity [, upstream replacement detector]"""
+    issues = store.verify(remote=remote)
     for issue in issues:
-        print(f"{issue.kind:<11} {issue.subject}: {issue.detail}", file=sys.stderr)
-    print(
-        f"verify: {len(issues)} issue(s)"
-        + (", --remote checked" if args.remote else "")
+        click.echo(f"{issue.kind:<11} {issue.subject}: {issue.detail}", err=True)
+    click.echo(
+        f"verify: {len(issues)} issue(s)" + (", --remote checked" if remote else "")
     )
-    return 1 if issues else 0
+    raise SystemExit(1 if issues else 0)
 
 
-def cmd_record(args: argparse.Namespace) -> int:
-    streams = record.parse_streams(args.streams)
-    if args.symbols:
-        symbols = parse_csv_list(args.symbols)
-    elif args.top:
-        snap = universe.latest("um")
+@cli.command("record")
+@click.option(
+    "--streams",
+    default="liquidations,funding,open_interest",
+    show_default=True,
+)
+@click.option("--symbols", default="", help="csv (per-symbol polls)")
+@click.option(
+    "--top", type=int, default=0, help="first N from the latest um universe snapshot"
+)
+@click.option(
+    "--minutes",
+    type=float,
+    default=0.0,
+    help="stop after N minutes (default: run until ^C)",
+)
+@click.option(
+    "--silence-alert",
+    type=float,
+    default=300.0,
+    show_default=True,
+    help="log a gap when the liquidations stream pushes nothing for N seconds",
+)
+def record_stream(
+    streams: str, symbols: str, top: int, minutes: float, silence_alert: float
+) -> None:
+    """accumulate liquidation/funding/OI feeds"""
+    parsed = record.parse_streams(streams)
+    if symbols:
+        syms = parse_csv_list(symbols)
+    elif top:
+        snap = universe_mod.latest("um")
         if snap is None:
-            raise SystemExit("no universe snapshot — run `quant universe sync`")
-        symbols = snap.symbols[: args.top]
+            raise click.ClickException(
+                "no universe snapshot — run `quant universe sync`"
+            )
+        syms = snap.symbols[:top]
     else:
-        symbols = []
-    if "open_interest" in streams and not symbols:
-        raise SystemExit("open_interest needs --symbols or --top (per-symbol poll)")
+        syms = []
+    if "open_interest" in parsed and not syms:
+        raise click.UsageError(
+            "open_interest needs --symbols or --top (per-symbol poll)"
+        )
     state = record.RecorderState(
-        symbols=symbols,
-        streams=streams,
-        minutes=args.minutes,
-        silence_alert=args.silence_alert,
+        symbols=syms,
+        streams=parsed,
+        minutes=minutes,
+        silence_alert=silence_alert,
     )
-    print(
-        f"recording {','.join(streams)}"
-        + (f" for {len(symbols)} symbols" if symbols else " (all-market flows)")
+    click.echo(
+        f"recording {','.join(parsed)}"
+        + (f" for {len(syms)} symbols" if syms else " (all-market flows)")
     )
     try:
         asyncio.run(record.run(state))
     except KeyboardInterrupt:
-        print("^C — final flushed", file=sys.stderr)
-    return 0
+        click.echo("^C — final flushed", err=True)
 
 
-def _parse_sets(pairs: list[str]) -> dict:
+def _parse_sets(pairs: tuple[str, ...]) -> dict:
     params: dict = {}
     for pair in pairs:
         key, _, raw = pair.partition("=")
@@ -165,187 +281,122 @@ def _parse_sets(pairs: list[str]) -> dict:
     return params
 
 
-def cmd_screen(args: argparse.Namespace) -> int:
-    if args.symbols:
-        symbols = parse_csv_list(args.symbols)
-    elif args.rank:
-        ranked = universe.rank_by_quote_volume("um", args.rank)
-        symbols = [symbol for symbol, _ in ranked]
-        print(
-            f"universe: top {args.rank} by 24h quote volume as of today"
+@cli.command()
+@click.option("--factor", required=True, type=click.Choice(sorted(screen_mod.FACTORS)))
+@click.option("--dataset", default="um_klines_1d", show_default=True)
+@click.option("--symbols", default="", callback=_csv_list, help="csv of symbols")
+@click.option("--rank", type=int, default=0, help="top N by 24h quote volume")
+@click.option("--since", required=True, help="YYYY-MM-DD")
+@click.option("--until", required=True, help="YYYY-MM-DD (clamped to seal)")
+@click.option(
+    "--rebalance", type=int, default=5, show_default=True, help="every N bars"
+)
+@click.option(
+    "--set",
+    "sets",
+    multiple=True,
+    metavar="K=V",
+    help="factor param, repeatable (e.g. --set lookback=180 --set hold=20)",
+)
+@click.option("--note", default="", help="free text into the manifest")
+def screen(
+    factor: str,
+    dataset: str,
+    symbols: list[str],
+    rank: int,
+    since: str,
+    until: str,
+    rebalance: int,
+    sets: tuple[str, ...],
+    note: str,
+) -> None:
+    """run a factor through the screening harness (holdout sealed)"""
+    if symbols:
+        syms = symbols
+    elif rank:
+        ranked = universe_mod.rank_by_quote_volume("um", rank)
+        syms = [symbol for symbol, _ in ranked]
+        click.echo(
+            f"universe: top {rank} by 24h quote volume as of today"
             " (a today-fact; the manifest freezes this list)",
-            file=sys.stderr,
+            err=True,
         )
     else:
-        raise SystemExit("pass --symbols or --rank N")
+        raise click.UsageError("pass --symbols or --rank N")
     spec = screen_mod.ScreenSpec(
-        factor=args.factor,
-        params=_parse_sets(args.set),
-        dataset=args.dataset,
-        symbols=symbols,
-        rebalance_every=args.rebalance,
-        start=args.since,
-        end=args.until,
-        note=args.note,
+        factor=factor,
+        params=_parse_sets(sets),
+        dataset=dataset,
+        symbols=syms,
+        rebalance_every=rebalance,
+        start=since,
+        end=until,
+        note=note,
     )
-    wide = screen_mod.signals.load_closes(spec.dataset, symbols)
+    wide = screen_mod.signals.load_closes(spec.dataset, syms)
     funding = (
-        screen_mod.signals.load_funding(symbols)
+        screen_mod.signals.load_funding(syms)
         if spec.factor in screen_mod.signals.FAST_FACTORS
         else None
     )
     result = screen_mod.run_screen(spec, wide, funding)
-    print(f"run_id        {spec.run_id}")
-    print(f"sealed before {result.sealed_from} (holdout unread)")
-    print(
+    click.echo(f"run_id        {spec.run_id}")
+    click.echo(f"sealed before {result.sealed_from} (holdout unread)")
+    click.echo(
         f"{'cost_bp':>8} {'sharpe':>7} {'cagr':>7} {'maxDD':>7}"
         f" {'turnover/pa':>11} {'cost/pa':>8} {'days':>5}"
     )
     for cost, m in sorted(result.metrics.items()):
-        print(
+        click.echo(
             f"{cost:>8g} {m['sharpe']:>7.2f} {m.get('cagr', 0):>7.2%}"
             f" {m.get('max_drawdown', 0):>7.2%} {m.get('turnover_pa', 0):>11.1f}"
             f" {m.get('cost_drag_pa', 0):>8.2%} {m['days']:>5}"
         )
     verdict = "PASS" if result.passed_stressed else "fail"
-    print(f"stressed-cost verdict: {verdict} (screening only — not proof)")
+    click.echo(f"stressed-cost verdict: {verdict} (screening only — not proof)")
     manifest = screen_mod.record_run(result)
     try:
         shown = manifest.relative_to(REPO_ROOT)
     except ValueError:  # redirected (tests)
         shown = manifest
-    print(f"ledger += rows; manifest -> {shown}")
-    return 0
+    click.echo(f"ledger += rows; manifest -> {shown}")
 
 
-def cmd_universe(args: argparse.Namespace) -> int:
-    if args.action == "sync":
-        for market in ("spot", "um"):
-            snapshot = universe.fetch_snapshot(market)
-            path = universe.store_snapshot(snapshot)
-            print(f"{market}: {len(snapshot.symbols)} USDT symbols -> " f"{path.name}")
-        return 0
-    if args.action == "rank":
-        ranked = universe.rank_by_quote_volume(args.market, args.top)
-        print(",".join(symbol for symbol, _ in ranked))
-        for symbol, volume in ranked:
-            print(f"{symbol:<12} {volume:>.0f}", file=sys.stderr)
-        return 0
+@cli.group()
+def universe() -> None:
+    """dated symbol-list snapshots"""
+
+
+@universe.command()
+def sync() -> None:
+    """fetch spot + um lists and store them dated"""
     for market in ("spot", "um"):
-        stored = universe.latest(market)
+        snapshot = universe_mod.fetch_snapshot(market)
+        path = universe_mod.store_snapshot(snapshot)
+        click.echo(f"{market}: {len(snapshot.symbols)} USDT symbols -> " f"{path.name}")
+
+
+@universe.command()
+def show() -> None:
+    """what snapshots are on disk"""
+    for market in ("spot", "um"):
+        stored = universe_mod.latest(market)
         if stored is None:
-            print(f"{market}: no snapshot — run `quant universe sync`")
+            click.echo(f"{market}: no snapshot — run `quant universe sync`")
         else:
-            print(f"{market}: {len(stored.symbols)} symbols as of {stored.day}")
-    return 0
+            click.echo(f"{market}: {len(stored.symbols)} symbols as of {stored.day}")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="quant",
-        description="research data plane over the Binance public archive",
-    )
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
-    def add_range(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--datasets", required=True, help="csv of dataset names")
-        p.add_argument("--symbols", default="", help="csv of symbols")
-        p.add_argument("--market", default="um", choices=["spot", "um"])
-        p.add_argument(
-            "--top",
-            type=int,
-            default=0,
-            help="first N from the "
-            "latest universe snapshot (requires quant universe sync)",
-        )
-        p.add_argument("--since", required=True, help="YYYY-MM")
-        p.add_argument("--until", default="", help="YYYY-MM (default: last month)")
-
-    p = sub.add_parser("download", help="diff-sync archives into raw/ + inventory")
-    add_range(p)
-    p.add_argument(
-        "--no-daily",
-        action="store_true",
-        help="skip daily files for the not-yet-published current month",
-    )
-    p.add_argument(
-        "--refresh",
-        action="store_true",
-        help="re-check upstream checksums and act on replacements",
-    )
-    p.set_defaults(func=cmd_download)
-
-    p = sub.add_parser("convert", help="build Parquet month partitions from raw")
-    add_range(p)
-    p.set_defaults(func=cmd_convert)
-
-    p = sub.add_parser("list", help="coverage of built partitions")
-    p.set_defaults(func=cmd_list)
-
-    p = sub.add_parser(
-        "verify",
-        help="local hashes, time-grid continuity" " [, upstream replacement detector]",
-    )
-    p.add_argument(
-        "--remote",
-        action="store_true",
-        help="also re-check every inventory file's upstream checksum",
-    )
-    p.set_defaults(func=cmd_verify)
-
-    p = sub.add_parser("record", help="accumulate liquidation/funding/OI feeds")
-    p.add_argument("--streams", default="liquidations,funding,open_interest")
-    p.add_argument("--symbols", default="", help="csv (per-symbol polls)")
-    p.add_argument(
-        "--top",
-        type=int,
-        default=0,
-        help="first N from the latest " "um universe snapshot",
-    )
-    p.add_argument(
-        "--minutes",
-        type=float,
-        default=0.0,
-        help="stop after N minutes (default: run until ^C)",
-    )
-    p.add_argument(
-        "--silence-alert",
-        type=float,
-        default=300.0,
-        help="log a gap when the liquidations stream pushes nothing for N seconds",
-    )
-    p.set_defaults(func=cmd_record)
-
-    p = sub.add_parser(
-        "screen",
-        help="run a factor through the screening harness (holdout sealed)",
-    )
-    p.add_argument("--factor", required=True, choices=sorted(screen_mod.FACTORS))
-    p.add_argument("--dataset", default="um_klines_1d")
-    p.add_argument("--symbols", default="", help="csv of symbols")
-    p.add_argument("--rank", type=int, default=0, help="top N by 24h quote volume")
-    p.add_argument("--since", required=True, help="YYYY-MM-DD")
-    p.add_argument("--until", required=True, help="YYYY-MM-DD (clamped to seal)")
-    p.add_argument("--rebalance", type=int, default=5, help="every N bars")
-    p.add_argument(
-        "--set",
-        action="append",
-        default=[],
-        metavar="K=V",
-        help="factor param, repeatable (e.g. --set lookback=180 --set hold=20)",
-    )
-    p.add_argument("--note", default="", help="free text into the manifest")
-    p.set_defaults(func=cmd_screen)
-
-    p = sub.add_parser("universe", help="dated symbol-list snapshots")
-    p.add_argument("action", choices=["sync", "show", "rank"])
-    p.add_argument("--market", default="um", choices=["spot", "um"])
-    p.add_argument("--top", type=int, default=0, help="rank: how many symbols")
-    p.set_defaults(func=cmd_universe)
-
-    args = parser.parse_args(argv)
-    return args.func(args)
+@universe.command()
+@click.option("--market", type=click.Choice(["spot", "um"]), default="um")
+@click.option("--top", type=int, default=0, help="rank: how many symbols")
+def rank(market: str, top: int) -> None:
+    """rank a market by 24h quote volume"""
+    ranked = universe_mod.rank_by_quote_volume(market, top)
+    click.echo(",".join(symbol for symbol, _ in ranked))
+    for symbol, volume in ranked:
+        click.echo(f"{symbol:<12} {volume:>.0f}", err=True)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    cli()

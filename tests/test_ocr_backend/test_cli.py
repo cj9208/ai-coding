@@ -1,9 +1,14 @@
-"""``ocr-backend`` CLI + model-registry tests — no network, no model load."""
+"""``ocr-backend`` CLI + model-registry tests — no network, no model load.
+
+The click commands wrap the module-level ``download`` / ``parse`` functions, so
+the CLI tests go through ``CliRunner`` and assert on the captured streams.
+"""
 
 import builtins
 import json
 
 import pytest
+from click.testing import CliRunner, Result
 
 from ocr_backend import cli
 from ocr_backend.backends import paddleocr_vl
@@ -17,6 +22,10 @@ from ocr_backend.contract import (
     OcrSource,
 )
 from ocr_backend.models import MODELS, is_ready
+
+
+def run(*args: str) -> Result:
+    return CliRunner().invoke(cli.cli, list(args))
 
 
 def test_registry_agrees_with_the_adapter_snapshot_name():
@@ -53,7 +62,7 @@ def test_download_fetches_registry_repo_into_model_store(monkeypatch, tmp_path):
     assert seen["spec"] == MODELS["paddleocr-vl-1.6"]
 
 
-def test_cli_reports_the_ready_store_path(monkeypatch, tmp_path, capsys):
+def test_cli_reports_the_ready_store_path(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "model_dir", lambda name: tmp_path / name)
 
     def fake_fetch(spec, dest):
@@ -61,21 +70,26 @@ def test_cli_reports_the_ready_store_path(monkeypatch, tmp_path, capsys):
 
     monkeypatch.setattr(cli, "_fetch", fake_fetch)
 
-    assert cli.main(["download", "paddleocr-vl-1.6"]) == 0
-    assert str(tmp_path / "paddleocr-vl-1.6") in capsys.readouterr().out
+    result = run("download", "paddleocr-vl-1.6")
+
+    assert result.exit_code == 0, result.output
+    assert str(tmp_path / "paddleocr-vl-1.6") in result.stdout
 
 
-def test_incomplete_snapshot_fails(monkeypatch, tmp_path, capsys):
+def test_incomplete_snapshot_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "model_dir", lambda name: tmp_path / name)
     monkeypatch.setattr(cli, "_fetch", lambda spec, dest: None)
 
-    assert cli.main(["download", "paddleocr-vl-1.6"]) == 1
-    assert "model.safetensors" in capsys.readouterr().err
+    result = run("download", "paddleocr-vl-1.6")
+
+    assert result.exit_code == 1
+    assert "model.safetensors" in result.stderr
 
 
 def test_unknown_model_is_rejected():
-    with pytest.raises(SystemExit):
-        cli.main(["download", "not-a-model"])
+    result = run("download", "not-a-model")
+
+    assert result.exit_code == 2
 
 
 def test_missing_huggingface_hub_reports_install_hint(monkeypatch, tmp_path):
@@ -178,22 +192,21 @@ def test_parse_passes_cli_flags_through_to_config(fake_backend, tmp_path):
     source = tmp_path / "scan.pdf"
     source.write_bytes(b"%PDF-fake")
 
-    cli.main(
-        [
-            "parse",
-            str(source),
-            "--out",
-            str(tmp_path / "out"),
-            "--device",
-            "cpu",
-            "--pipeline-version",
-            "v1.6",
-            "--model-dir",
-            "/models/paddleocr-vl-1.6",
-            "--format-block-content",
-        ]
+    result = run(
+        "parse",
+        str(source),
+        "--out",
+        str(tmp_path / "out"),
+        "--device",
+        "cpu",
+        "--pipeline-version",
+        "v1.6",
+        "--model-dir",
+        "/models/paddleocr-vl-1.6",
+        "--format-block-content",
     )
 
+    assert result.exit_code == 0, result.output + repr(result.exception)
     cfg = fake_backend.last_config
     assert cfg.device == "cpu"
     assert cfg.pipeline_version == "v1.6"
@@ -210,11 +223,9 @@ def test_parse_closes_backend_even_after_success(fake_backend, tmp_path):
     assert fake_backend.closed
 
 
-def test_cli_parse_missing_source_exits_before_touching_backend(
-    fake_backend, tmp_path, capsys
-):
-    rc = cli.main(["parse", str(tmp_path / "nope.pdf"), "--out", str(tmp_path / "out")])
+def test_cli_parse_missing_source_exits_before_touching_backend(fake_backend, tmp_path):
+    result = run("parse", str(tmp_path / "nope.pdf"), "--out", str(tmp_path / "out"))
 
-    assert rc == 1
-    assert "not found" in capsys.readouterr().err
+    assert result.exit_code == 1
+    assert "not found" in result.stderr
     assert fake_backend.last_config is None
