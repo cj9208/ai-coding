@@ -12,6 +12,7 @@ from quantdesk.archive import InventoryRecord, append_inventory, sha256_of
 from quantdesk.config import DATASETS
 
 KLINE_1M = DATASETS["um_klines_1m"]
+FUNDING = DATASETS["um_funding_rate"]
 BASE_US = 1_717_200_000_000_000  # 2024-06-01T00:00Z, microseconds
 
 
@@ -47,6 +48,62 @@ def test_grid_check_flags_missing_bars(qdesk: Path) -> None:
     _write_month("BTCUSDT", "2024-06", _grid_frame(1440, {100, 200, 300}), qdesk)
     issues = store.check_grid(KLINE_1M, "BTCUSDT", ["2024-06"])
     assert len(issues) == 1 and issues[0].kind == "grid"
+
+
+def _write_funding_month(
+    symbol: str,
+    offsets_h: list[float],
+    decls_h: list[float],
+    qdesk: Path,
+    jitter_us: int = 8_000,
+) -> None:
+    """Settlement rows at the given hour offsets, calc_time carrying the
+    ms jitter the real archive has."""
+    times = (
+        (
+            pl.Series(
+                [int(h * 3_600_000_000) + jitter_us for h in offsets_h], dtype=pl.Int64
+            )
+            + BASE_US
+        )
+        .cast(pl.Datetime("us"))
+        .dt.replace_time_zone("UTC")
+    )
+    frame = pl.DataFrame(
+        {
+            "calc_time": times,
+            "funding_interval_hours": pl.Series(decls_h, dtype=pl.Float64),
+            "last_funding_rate": [0.0001] * len(offsets_h),
+        }
+    )
+    target = (
+        qdesk
+        / "parquet"
+        / FUNDING.dir_slug
+        / f"symbol={symbol}"
+        / "year=2024"
+        / "month=06"
+    )
+    target.mkdir(parents=True, exist_ok=True)
+    frame.write_parquet(target / "part-2024-06.parquet")
+
+
+def test_funding_grid_tolerates_compression_skips_and_jitter(qdesk: Path) -> None:
+    # 8h -> 4h compression mid-month, one skipped 4h settlement (the
+    # 2026-06-24 ENA/HYPE/TAO event), ms jitter throughout.
+    _write_funding_month(
+        "AAAUSDT", [0, 8, 16, 20, 24, 32, 40], [8, 8, 4, 4, 4, 8, 8], qdesk
+    )
+    assert store.check_funding_grid(FUNDING, "AAAUSDT", "2024-06") == []
+
+
+def test_funding_grid_flags_off_grid_gaps(qdesk: Path) -> None:
+    # 6h between 8h-declared settlements: no whole multiple of either
+    # endpoint's interval — corrupted times, not a skippable gap.
+    _write_funding_month("BBBUSDT", [0, 8, 14, 22, 30], [8, 8, 8, 8, 8], qdesk)
+    issues = store.check_funding_grid(FUNDING, "BBBUSDT", "2024-06")
+    assert len(issues) == 1 and issues[0].kind == "grid"
+    assert "no whole multiple" in issues[0].detail
 
 
 def test_local_hash_detects_tampering(qdesk: Path) -> None:

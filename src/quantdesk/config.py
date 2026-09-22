@@ -101,7 +101,10 @@ DATASETS: dict[str, Dataset] = {
             monthly=True,
             daily=False,  # funding archives are published monthly only
             time_col="calc_time",
-            step_us=8 * 3_600_000_000,
+            # no fixed step: the exchange compresses settlement intervals
+            # (8h -> 4h -> 2h) and sometimes skips a single settlement, so
+            # continuity is the interval-aware store.check_funding_grid
+            step_us=0,
         ),
         Dataset(
             name="spot_agg_trades",

@@ -37,7 +37,8 @@ network.
   check. `dir_slug` = name with `/` → `_` for the hive directory.
 - `DATASETS` (7 entries): `spot_klines_1m`, `spot_klines_1s`,
   `spot_klines_1d`, `um_klines_1m`, `um_klines_1d`,
-  `um_funding_rate` (monthly-only, `step_us` = 8 h),
+  `um_funding_rate` (monthly-only, `step_us` = 0 → the interval-aware
+  `check_funding_grid`, see below),
   `spot_agg_trades` (`step_us=0` → grid check skipped).
 - kline `step_us` from `_SPOT_KLINE_STEP`: 1m = 60 000 000,
   1s = 1 000 000, 1d = 86 400 000 000 µs.
@@ -53,7 +54,9 @@ network.
   key), `filename` (`SYM[-interval|kind]-stamp.zip`), `relative_path`
   (upstream layout, also our `raw/` layout), `url`, `local_path`.
 - `http_get` is **the one network seam** (tenacity: 3 attempts,
-  exponential 1–10 s; 404 → `RemoteMissing`, which callers turn into a
+  exponential 1–10 s — but `RemoteMissing` (404) is never retried: a
+  missing month is a durable answer, and retrying it tripled the cost
+  of every gap during the top-20 backfill; callers turn it into a
   `missing` action, not an error). Tests fake this function only.
 - `fetch_checksum(url)` reads the `.zip.CHECKSUM`; together with
   `sha256_file` it produces the two recorded hashes per file:
@@ -102,11 +105,23 @@ One output per (dataset, symbol, month):
   the index, no catalog.
 - `verify(remote)` runs the three checks in the order their failure
   modes bite: `check_local_hashes` (disk rot; kinds `inventory` /
-  `local-hash`), `check_grid` per built month
-  (`(max-min)//step_us + 1 == rows`, exact for klines and funding,
-  skipped when `step_us == 0`), and with `--remote`,
+  `local-hash`), the grid check per built month — `check_grid`
+  (`(max-min)//step_us + 1 == rows`, exact for fixed-step bars) or,
+  for funding, `check_funding_grid` — and with `--remote`,
   `check_replacements` — a moved upstream checksum is reported as
   `REPLACED … re-download with --refresh`, never silently fixed.
+- **Funding has no fixed step** (trap found by the full backfill, not
+  by the first probe): the exchange compresses settlement intervals
+  per contract (8h → 4h → 2h — on the top-20 corpus: 94 092 8h,
+  13 196 4h, 98 2h gaps) and *skips* single settlements outright
+  (ENA/HYPE/TAO all lack 2026-06-24T04:00, verified absent from
+  Binance's own zips), while `calc_time` carries ms jitter. So the
+  span-vs-rows math cannot hold; the honest invariant is per-gap:
+  every gap must be a whole multiple (±1 s) of at least one endpoint
+  row's `funding_interval_hours`. That catches off-grid corruption
+  and tolerates upstream skips — a dropped row and a skipped
+  settlement are indistinguishable by timestamps, so row fidelity
+  rests on `check_local_hashes` + `convert`'s determinism instead.
 - Nonzero exit on any issue is deliberate: `verify` is a gate, not a
   report.
 
@@ -240,7 +255,7 @@ screen / universe sync|show|rank`); the full flag reference is
 | --- | --- |
 | `test_archive.py` | URL/path derivation, diff-sync outcomes, replacement event recorded not swallowed |
 | `test_convert.py` | ms/µs sniffing per file, header sniffing, monthly-beats-daily, de-dup |
-| `test_store.py` | grid math, local-hash rot detection, remote REPLACED detection |
+| `test_store.py` | grid math (bars + funding: compression, skip, jitter tolerated; off-grid gap flagged), local-hash rot detection, remote REPLACED detection |
 | `test_record.py` | parsers, append-only day buckets, deadline-bounded `run()` exit, silence → gap log |
 | `test_signals.py` | winner picks, **future-blindness** (full vs truncated frame identical), min-obs exclusion, gross caps, flat-funding not in either tail |
 | `test_screen.py` | exact shift-day arithmetic of `pnl`, holdout clamp bounds `to`, byte-identical rerun manifests, CLI end-to-end against a seeded hive |
