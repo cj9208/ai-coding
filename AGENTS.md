@@ -34,7 +34,7 @@ the others, except where noted below.
 - Run tests: `uv run pytest`. Async tests work via `asyncio_mode = "auto"`
   (no markers needed).
 - CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`,
-  `research-agent`, `ocr-backend`, `ocr-review`, `rag`, `skills`
+  `research-agent`, `ocr-backend`, `ocr-review`, `rag`, `skills`, `orchestrate`
   (`[project.scripts]`). `skills` is the one owner of vendored AI skills —
   `sync` / `list` / `outdated` / `add` (see "AI skills & specs").
   `ocr-backend` has three subcommands: `download <model>` (provisions a
@@ -80,6 +80,7 @@ are already there). Env convention lives only in
 | `src/file_manager/` | FastAPI file manager, metadata-first search (FTS5) | no |
 | `src/research_agent/` | research & recommendation agent — **MVP implemented & live-verified 2026-09-20** (`research-agent new/answer/status/report`); design docs in `docs/research-recommendation-agent/` (read `00-overview.md` first, `06-usage-guide.md` to run it), module layout mirrors the docs (orchestrator/research/clarifying/recommendation/contracts/persistence — the storage subpackage was renamed to dodge the top-level `storage` clash) | yes, via `llm_client` |
 | `src/rag/` | knowledge pipeline over OCR output: `rag build/query/eval/status/traces/enrich` — M1 (lexical-only, vector-free by design) implemented & live-verified 2026-09-21; docs in `docs/rag/` (read `00-overview.md` first — it maps rationale / implementation / usage to the three volumes), sample golden file `tests/golden/rag_sample.jsonl`. Enrich is an independent background step (`rag enrich`), not part of build — it persists LLM annotations to the `inferred` table per chunk, so different chunks can have different enrich states | yes, query-time + `rag enrich` (independent), via `llm_client` |
+| `src/orchestrator/` | enterprise request-orchestration runtime — the deterministic harness (4 decision tables with row ids, budget-bounded state machine, 7 typed runtime objects persisted to SQLite via `src/storage`) in which the LLM only proposes and the harness decides; implementation contract is `docs/orchestrator-design.md` (read it first — DP-1..DP-10 and M0-M3 are fixed there). **M0-M3 shipped 2026-09-22** (M0: contracts/store/policy/runtime/registry/golden + CLI `status/replay/handoff/golden run`, zero-LLM; M1: deterministic front half — `safety` pattern gate, `normalize` Chinese alias table, flash `interpret` via `llm_client`, CLI `ask`/`ask --resume`; M2: production registry from `config/orchestrator/capabilities.yaml` + `capabilities/rag.py` adapter over `rag query`'s store + CLI `registry check`; M3: `capabilities/lookup.py` over file_manager metadata search, declared as rag's runnable fallback so `switch_capability` (e4/v3) is live — verified end-to-end on the real file_manager db). Wall clock budgets machine work only: human clarification gaps are accounted out (`wall_clock_paused_ms`). Golden cases: `config/orchestrator/golden_cases.jsonl` | yes, front-half flash + query-time capabilities, via `llm_client` |
 | `src/skill_manager/` | vendored AI skills, end to end: `sources.UPSTREAMS` declares each repository pinned to a commit sha (mirrors `ocr_backend.models`), `vendor.py` provisions the gitignored clones under `repo-skills/`, `install.py` rebuilds every generated install dir (`.opencode/skills/`) as a full view of the declaration — pruning names no longer declared, `cli.py` is the `skills` entry point. No LLM, no DB, no network beyond `git clone`/`fetch` | no |
 | `src/coding/`, `src/modules/` | standalone algorithm exercises and small one-off scripts (e.g. `analyze_birth.py`, `analyze_package_size.py` — root-level scripts were moved into `modules/` to keep `src/` clean), plus `seating_app.py`: a Streamlit classroom-seating app (`streamlit run src/modules/seating_app.py`, uploads its own Excel) — it is why streamlit/pandas/openpyxl/xlsxwriter sit in the core deps | no |
 | `scripts/` | kept-for-the-record verification scripts, one per investigation (`verify_paddle_vl_16.py` is the evidence trail behind `docs/ocr-backend-design.md` §5.3). Machine-local helpers here are gitignored, not deleted — add new ones to `.gitignore` deliberately | no |
@@ -194,3 +195,10 @@ are already there). Env convention lives only in
   (see `docs/ai-market-radar-pipeline.md` as the reference example).
 - Multi-part designs get a folder (`docs/research-recommendation-agent/`)
   with a numbered overview as the entry point.
+- `docs/orchestrator-design.md` is the implementation contract for
+  `src/orchestrator/` (enterprise request-orchestration runtime; **M0–M3
+  all shipped, live-verified**). It fixes the DP-1..DP-10 positions, the M0–M3 build order,
+  and the per-milestone implementation notes (fallback legality, id scheme,
+  wall-clock-vs-human-time, switch-path signal derivation, resolved open
+  questions). Start there before implementing — do not re-derive it from the
+  source blog note set.
