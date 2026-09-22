@@ -27,8 +27,9 @@ contract's per-milestone Implementation Notes are the official record of
                        time-sortable
 
  THE FRONT HALF (M1)
- interpret.py    226   LlmFrontHalf: gate -> normalize -> flash chat_json,
-                       all three assets selected by the caller's locale pack
+ interpret.py    271   LlmFrontHalf: gate -> normalize -> (fast path | flash
+                       chat_json), all three assets selected by the
+                       caller's locale pack
  safety.py       ~85   SafetyRow/Verdict shapes + first-match + locale-aware
                        evaluate (late pack lookup; no silent allow on miss)
  packs/          05b   per-locale front-half assets: base.py (shapes),
@@ -36,7 +37,8 @@ contract's per-milestone Implementation Notes are the official record of
                        en.py (first tranche, IGNORECASE rows, no aliases yet)
  normalize.py    103   specificity scoring, traceable rule hits
                        (default ALIASES now come from the zh pack)
- config.py        65   Budget / Thresholds / Models defaults, env overrides
+ config.py        79   Budget / Thresholds / Models / FastPath defaults,
+                       env overrides
 
  THE CAPABILITIES (M2/M3)
  capabilities/rag.py     188   RagQueryCapability over src/rag store
@@ -118,6 +120,8 @@ that the tables alone cannot state — they are the M3 notes condensed:
 | `Thresholds.GROUNDING_COVERAGE_MIN` | 0.5 | below this, v3 fires before v6 |
 | `Thresholds.CONSERVATIVE_TOPK_FACTOR` | 1.5 | the entire DP-10 ladder |
 | `Models.FLASH` / `Models.ESCALATED` | env-overridable renames | `ORCHESTRATOR_FLASH_MODEL` / `ORCHESTRATOR_STRONG_MODEL`; empty ⇒ llm_client default |
+| `FastPath.ENABLED` | env-gated, default **off** | 05c step 3: `ORCHESTRATOR_FAST_PATH=1` lets a strong alias hit synthesize the front-half proposal with zero tokens; eligibility = deterministic half of `strong_evidence` + plain gate allow; parity-tested |
+| `FastPath.TASK_TYPE` | `"faq_howto"` | the whole fast-path-eligible set, one constant — the synthesized proposal *carries* it (task type is model output on the LLM path) |
 
 ## Registry: two views, one interface
 

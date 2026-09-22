@@ -228,6 +228,13 @@ are already there). Env convention lives only in
   the safety gate now also sees clarification *answers*, and gate
   constraints can't be revoked by a model proposal — while the gateway
   contract (authN/rate-limit/moderation before `run_turn`) is written
-  into `03-usage.md`. The service host that would consume the
+  into `03-usage.md`. **05c steps 1–3 landed the same day**: cost model
+  written (`docs/orchestrator/05c-cost-gate.md` §1), per-user daily
+  LLM-call quota gate enforced by routing row r10 through a contract
+  amendment (g18/g19), and the deterministic fast path behind
+  `ORCHESTRATOR_FAST_PATH=1` (default off; parity test: same input both
+  paths fires identical row ids, fast path spends zero calls) — the
+  answer cache is parked by the model's NO-GO until real traffic prices
+  its hit rate. The service host that would consume the
   rest is unbuilt; remaining 05b–05d steps are gated on their triggers.
   The contract stays the decisions authority.

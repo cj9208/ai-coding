@@ -13,6 +13,10 @@ behind them.
   are orchestrator-only overrides: `ORCHESTRATOR_FLASH_MODEL` (front-half
   interpretation) and `ORCHESTRATOR_STRONG_MODEL` (the single escalation
   tier, DP-9); empty means "fall through to `LLM_MODEL`".
+  `ORCHESTRATOR_FAST_PATH=1` (default off) enables the 05c deterministic
+  fast path: a strong alias hit under a plain gate allow synthesizes the
+  front-half proposal with zero model calls — parity-tested to route
+  identically, so turning it on changes spend, never decisions.
 - **RAG corpus** (only for asks that route to `rag_query`): a built KB at
   `data/rag/kb.db` (`rag build` from `data/rag_inbox/`). The registry
   binds the real `RagQueryCapability`; no second index, no `--data-dir`

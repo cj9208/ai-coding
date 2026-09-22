@@ -59,7 +59,7 @@ only prose here.
 | --- | --- | --- |
 | §1 deployment shape | **fixed (embeddability) — the host is still open** — `interpret`/`Capability.run` are coroutines, `run_turn_async`/`resume_async` await inside a running loop (pinned by `test_async_surface.py`), sync shims keep CLI/golden/bench unchanged | 05a step 5; what queues behind it is the *service host itself* (gateway, queue worker) — 05b lands identity on it, B.4/B.6 live there |
 | §2 write path | **fixed & measured** — explicit `busy_timeout`, per-pass batching (~20→8 commits/turn), `requests.version` CAS, seq on envelope; throughput 45→137 turns/s at 16 writers | 05a steps 2–3; residual: `resume()` still doesn't verify `user_id` — 05b (lost-update hazard already closed by CAS, so this is attribution not integrity) |
-| §3 cost/quota | **fixed (quota gate)** — per-user daily LLM-call allowance enforced by routing row r10 via a contract amendment; cost model written (05c §1) with the step-3 GO / step-4 NO-GO verdicts | 05c steps 1–2 (2026-09-22); the per-*money* (token) ledger and per-tenant allowances ride on the service host |
+| §3 cost/quota | **fixed (quota gate) + economically hardened (fast path)** — per-user daily LLM-call allowance enforced by routing row r10 via a contract amendment; deterministic fast path landed behind a default-off flag with the parity test; cost model written (05c §1) with the step-3 GO / step-4 NO-GO verdicts | 05c steps 1–3 (2026-09-22); the per-*money* (token) ledger, per-tenant allowances, and the parked answer cache ride on the service host |
 | §4 tenancy/identity | **open** — tenant column still absent, `handoff list` still returns every user's packets | 05b |
 | §5a clarification never expires | **fixed** — 7-day TTL, resume-past-TTL forces clean re-interpret, `clarification_expired` event keeps it auditable | 05a step 2 |
 | §5b handoff black hole | **open** — no worklist, no recovery edge (DP-3 conversation) | 05d |
@@ -74,7 +74,7 @@ only prose here.
 | A.5 batching → Postgres, in that order | **batching done; Postgres closed as "won't trigger"** for pilot-A throughput, with named reopen conditions | 05a steps 3–4 (verdict) |
 | A.6 handoff = headcount | **open** | 05d |
 | B.1 adversarial input | **hardened (harness side)** — adversarial test class landed; two real holes found + fixed (ungated resume answer, model-revocable gate constraint); regex-gate ceilings recorded, gateway contract written | 05b steps 4–5 (2026-09-22); authN/rate-limit enforcement awaits a deployment |
-| B.2 LLM call as economic decision | **open** — fast path + answer cache unbuilt | 05c |
+| B.2 LLM call as economic decision | **hardened economically** — quota gate landed (05c step 2) + deterministic fast path landed behind a default-off flag, parity-tested (step 3); answer cache **parked** per the cost model's NO-GO (hit rate unmeasured, no long-lived host) | 05c steps 1–3 (2026-09-22); cache reopens when real traffic can price its hit rate |
 | B.3 no idempotency | **open** — one envelope field + one uniqueness check, unbuilt | 05b, before public traffic |
 | B.4 streaming latency | **open** — needs a host to own the response stream (embeddability itself is no longer the blocker) | after the service host exists |
 | B.5 regional cells | **open by design** — DP-8 intact; nothing to build until a second region exists | A.4 supplies the release mechanics |
@@ -93,9 +93,11 @@ Two readings the ledger forces:
 - **With 05a complete, the open list is one gate and three rooms.**
   The gate is the service host itself — embeddability landed (step 5),
   but nothing hosts the harness yet, and §4/§6c/B.3/B.4/B.6 all
-  read "after the host" on their owner line (§3's quota gate went
-  ahead of the host — it defends the pilot's wallet from a script
-  today). Behind it sit the trust
+  read "after the host" on their owner line (§3's quota gate and
+  fast path went ahead of the host — one defends the pilot's wallet
+  from a script today, the other is a flag-off lever waiting for B's
+  cost curve; only the answer cache waits for the host's traffic
+  logs). Behind it sit the trust
   (05b), cost (05c) and governance (05d) rooms, whose triggers are
   calendar/legal, not technical. The storage engine is in no room:
   measured, batched, and closed as "won't trigger" for Postgres.
@@ -386,6 +388,14 @@ benchmark; every claim cites the file that makes it.
    the front-half model, plus `(normalized_query, corpus_version)`
    answer caching — the first lever in `../rag/04-scaling.md`'s
    query-side options lands here for money, not latency.
+   *(Fast path landed 2026-09-22 (05c step 3) behind
+   `ORCHESTRATOR_FAST_PATH=1`, default off: eligibility is exactly the
+   deterministic half of `strong_evidence` plus a plain gate allow, the
+   synthesized proposal reports `model_name="none"` so the quota gate
+   counts it as zero spend, and the parity test pins "same input,
+   identical fired row-ids". The cost model (05c §1) then priced the
+   cache's payoff at hit-rate × 68% of request spend with no measured
+   hit rate — parked, reopen conditions named there.)*
 3. **No idempotency.** `run_turn` mints `request_id` server-side
    (`contracts.py:202`); an external retry storm creates N billable,
    stateful requests. A client-supplied idempotency key is one field on
@@ -437,7 +447,9 @@ ordered:
 4. (B, before public exposure) **idempotency key + authN + rate limit +
    adversarial golden class**;
 5. (B economics) **deterministic fast path + answer cache**, sized by a
-   real cost model (one afternoon: calls × tokens × price at B volume);
+   real cost model (one afternoon: calls × tokens × price at B volume)
+   — ✅ cost model written + fast path landed flag-off (05c steps
+   1, 3); cache parked by the model's NO-GO until traffic prices it;
 6. (A, when entries > ~20) **registry governance**: selection consumes
    `rollout_status`/`cost_profile`/`latency_profile`, or they die —
    a contract (DP-5) conversation, tracked like DP-3's handoff question;
@@ -507,8 +519,11 @@ keeps the original dependency order with markers.
    Residual: `resume()` attribution checking deferred to 05b.
 3. **Identity + tenancy land together** (§4): gateway-asserted user_id,
    tenant column on `requests` + filter in every read path — open, 05b.
-4. **`quota_context` as a boolean routing signal** (§3): budget field +
-   one routing row + golden cases for the exhausted path — open, 05c.
+4. ✅ **`quota_context` as a boolean routing signal** (§3) — shipped
+   2026-09-22 (05c steps 2–3): budget field + routing row r10 +
+   goldens g18/g19, plus the flag-off deterministic fast path with the
+   parity test. Item 5's answer-cache half stays parked per the cost
+   model.
 5. ✅ **Cheap storage wins** (§6) — shipped: two indexes (bench-
    verified), clarification TTL. Still open from this item:
    per-corpus-version store handles (05a step 5E).

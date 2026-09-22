@@ -1,10 +1,11 @@
 # Orchestrator Scaling Sub-plan 05c — Cost Gate
 
-Status: **executing 2026-09-22** — steps 1 (cost model) and 2 (quota
-gate) landed; the routing-row change went through as a contract
-amendment (`docs/orchestrator-design.md`, "Amendment 2026-09-22: the
-quota row"). Step 3's GO and step 4's NO-GO-for-now are the cost
-model's conclusions — see §1.
+Status: **executing 2026-09-22** — steps 1 (cost model), 2 (quota
+gate) and 3 (deterministic fast path, behind a default-off flag)
+landed; the routing-row change went through as a contract amendment
+(`docs/orchestrator-design.md`, "Amendment 2026-09-22: the quota
+row"). Step 3's GO and step 4's NO-GO-for-now are the cost model's
+conclusions — see §1.
 
 **One sentence:** cut per-request LLM spend with a boolean quota gate,
 a deterministic fast path that bypasses flash interpretation, and a
@@ -154,7 +155,7 @@ sketch above):**
   suite shares one database and one case's quota spend must not leak
   into the next case's routing.
 
-### 3. Deterministic fast path (B.2)
+### 3. Deterministic fast path (B.2) — landed
 
 `normalize` already computes the evidence that justifies skipping flash
 interpretation: an alias hit with `top_match ≥ STRONG_TOP_MATCH` and
@@ -175,6 +176,35 @@ interpretation: an alias hit with `top_match ≥ STRONG_TOP_MATCH` and
 The parity golden is the angle's centerpiece: **the same input through
 the flash path and the fast path must emit identical fired row-ids.**
 If they diverge, the fast path is wrong, not the tables.
+
+**Step 3 implementation notes (landed 2026-09-22; deltas from the
+sketch above):**
+
+- The "task type is in a fast-path-eligible set" clause had a
+  chicken-and-egg: task type is *model output*, and the fast path
+  exists to skip the model. Resolved by making the set a constant:
+  `config.FastPath.TASK_TYPE = "faq_howto"` is the whole eligible set,
+  and it is the task type the synthesized proposal *carries*, not one
+  it waits for. A strong alias hit on a non-faq phrasing is caught by
+  the other preconditions, not by guessing the type.
+- "Quota is available" dropped as a precondition: quota is enforced by
+  the routing row, and a proposer does not consult the harness's gate
+  (DP-9 posture). "Safety raised no flags" tightened to
+  `verdict.decision == allow` — a constrain or clarify row still gets
+  the model, so the fast path only ever replaces a call the tables were
+  going to spend on a plain allow.
+- The synthesized proposal reports `model_name="none"`, the same value
+  a hard stop reports — so the quota gate (§2) counts the fast path as
+  the zero-spend pass it is with no new special case.
+- The flag is `ORCHESTRATOR_FAST_PATH=1` (`config.FastPath.ENABLED`,
+  default off), per the sketch's "until goldens prove parity".
+- Parity is pinned as a pytest
+  (`test_fast_path_and_flash_path_fire_identical_rows`), not a golden
+  case: goldens replay under one fixed process environment, and the
+  parity contract needs *both* flag states in one run. The test asserts
+  identical fired row-ids (`route_r7_proceed_strong` →
+  `exec_e6_proceed_grounded` → `val_v5_accept`) and a quota delta of
+  exactly 1 vs 0 — the only observable difference between the paths.
 
 ### 4. Answer cache
 
@@ -200,8 +230,9 @@ If they diverge, the fast path is wrong, not the tables.
    NO-GO pending hit-rate data.
 2. ✅ Quota context + routing row + counting + goldens (2026-09-22;
    counting lives in the runtime, not a wrapper — see §2 notes).
-3. Fast path behind flag + parity goldens (needs step 1's numbers to
-   justify; needs nothing else). — GO per §1
+3. ✅ Fast path behind flag + parity test (2026-09-22; eligibility is
+   the deterministic half of `strong_evidence`, the flag defaults off —
+   see §3 notes). — GO per §1
 4. Answer cache table + read-through + corpus_version keying (needs
    05a step 5 — landed — and measured hit rate — missing). — parked
    per §1
@@ -213,12 +244,17 @@ If they diverge, the fast path is wrong, not the tables.
 - ✅ Quota: exhausted-path golden (g18); escalation-consumes-quota
   golden (g19); row-position test (r2 before r10 before r3); day-sum
   store tests (UTC window, exclusion, legacy rows).
-- Fast path: parity suite (same fired row-ids on both paths) across
-  the existing golden inputs where eligible.
+- ✅ Fast path: parity test — same input through both paths fires the
+  identical row-ids and differs only in quota consumed (1 vs 0); the
+  five eligibility guards (off by default, strong-hit skip, gate never
+  bypassed, escalation always calls, weak hit still calls) each have
+  their own test. "Across the existing golden inputs where eligible"
+  is deliberately *not* claimed: with the flag off, goldens already
+  prove the flash path alone.
 - Cache: (parked) a hit returns the identical outcome object; a
   republish bump (corpus_version changes) → miss; cross-tenant key
   isolation test.
-- Suite green; the flag defaults off.
+- ✅ Suite green; the flag defaults off.
 
 ## Non-goals
 

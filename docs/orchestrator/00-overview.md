@@ -71,11 +71,15 @@ ask it questions; the contract first if you intend to *change* behavior;
   (`test_adversarial.py` — two real holes fixed: resume answers are now
   gated, gate constraints can no longer be revoked by a proposal) and
   the **gateway deployment contract** in `03-usage.md`. Remaining 05b
-  steps (identity, idempotency) await the service host; **05c steps 1–2
+  steps (identity, idempotency) await the service host; **05c steps 1–3
   landed** — cost model written (`05c-cost-gate.md` §1, with the step-3
-  GO / step-4 NO-GO verdicts) and the per-user daily LLM-call quota gate
-  enforcing it via routing row r10, added through a contract
-  amendment. 05d awaits its triggers.
+  GO / step-4 NO-GO verdicts), the per-user daily LLM-call quota gate
+  enforcing it via routing row r10 (added through a contract
+  amendment), and the deterministic fast path behind
+  `ORCHESTRATOR_FAST_PATH=1` (default off, parity-tested: same input,
+  identical fired row-ids, zero model calls). The answer cache stays
+  parked per the model until traffic prices its hit rate. 05d awaits
+  its triggers.
   04 carries a **problem status ledger** — read it first for
   per-problem state.
 

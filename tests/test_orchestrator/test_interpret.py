@@ -131,6 +131,103 @@ async def test_escalation_names_the_stronger_model(
     assert out.interpretation.model.model_name == "strong-model-x"
 
 
+# -- the deterministic fast path (05c step 3) ---------------------------------
+STRONG_ALIAS_INPUT = "春晖省钱卡怎么续费"
+
+
+@pytest.fixture()
+def fast_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    from orchestrator import interpret as interpret_module
+
+    monkeypatch.setattr(interpret_module.FastPath, "ENABLED", True)
+
+
+async def test_fast_path_off_by_default_never_skips() -> None:
+    stub = StubLLM([dict(STRONG)])
+    await LlmFrontHalf(stub).interpret(_envelope(STRONG_ALIAS_INPUT))
+    assert len(stub.calls) == 1
+
+
+async def test_fast_path_skips_the_call_on_a_strong_alias_hit(
+    fast_on: None,
+) -> None:
+    stub = StubLLM([dict(STRONG)])
+    out = await LlmFrontHalf(stub).interpret(_envelope(STRONG_ALIAS_INPUT))
+    assert stub.calls == []  # the milestone's whole point: zero tokens
+    interp = out.interpretation
+    assert interp.model.model_name == "none"  # quota counts it as zero spend
+    assert interp.task_type == "faq_howto"
+    assert interp.target_entity_guess == "春晖省钱卡"
+    assert interp.deterministic.top_match_score == 1.0
+    assert out.safety == SafetyDecision.allow
+
+
+async def test_fast_path_never_bypasses_the_gate(fast_on: None) -> None:
+    # a strong alias hit plus a write request: constrain, and the model
+    # still interprets (the fast path only replaces the *proposal*)
+    stub = StubLLM([{**STRONG, "interpretation_summary": "群发通知"}])
+    out = await LlmFrontHalf(stub).interpret(
+        _envelope(f"{STRONG_ALIAS_INPUT}，帮我群发一条会议通知")
+    )
+    assert out.safety == SafetyDecision.constrain
+    assert len(stub.calls) == 1
+
+
+async def test_escalation_always_calls_the_model(fast_on: None) -> None:
+    stub = StubLLM([dict(STRONG)])
+    await LlmFrontHalf(stub).interpret(_envelope(STRONG_ALIAS_INPUT), escalated=True)
+    assert len(stub.calls) == 1
+
+
+async def test_weak_alias_hit_still_calls_the_model(fast_on: None) -> None:
+    stub = StubLLM([dict(STRONG)])
+    out = await LlmFrontHalf(stub).interpret(_envelope("省钱卡怎么续费"))
+    assert len(stub.calls) == 1  # nickname: top_match 0.6 < STRONG_TOP_MATCH
+    assert out.interpretation.deterministic.top_match_score == 0.6
+
+
+async def test_fast_path_and_flash_path_fire_identical_rows(
+    tmp_path: Path, fast_on: None
+) -> None:
+    """The parity contract (05c §3): same input, both paths, identical
+    fired row-ids — and the only observable difference is the quota count."""
+    from orchestrator.golden import _fired_row_ids
+
+    async def run(name: str, enabled: bool) -> tuple[list[str], int]:
+        from orchestrator import interpret as interpret_module
+
+        monkey_set = getattr(interpret_module.FastPath, "ENABLED")
+        interpret_module.FastPath.ENABLED = enabled
+        try:
+            stub = StubLLM([dict(STRONG)])
+            orch = _orchestrator(tmp_path, stub, name)
+            result = await orch.run_turn_async(
+                STRONG_ALIAS_INPUT, user_id=f"parity:{name}"
+            )
+            assert result.status.value == "completed"
+            env = orch.store.get_request(result.request_id)
+            assert env is not None
+            return (
+                _fired_row_ids(orch.store, result.request_id),
+                env.attempt_counters.llm_calls,
+            )
+        finally:
+            interpret_module.FastPath.ENABLED = monkey_set
+
+    fired_flash, spent_flash = await run("flash.db", False)
+    fired_fast, spent_fast = await run("fast.db", True)
+    assert (
+        fired_flash
+        == fired_fast
+        == [
+            "route_r7_proceed_strong",
+            "exec_e6_proceed_grounded",
+            "val_v5_accept",
+        ]
+    )
+    assert (spent_flash, spent_fast) == (1, 0)
+
+
 # -- locale packs at the front half (05b step 1) ---------------------------------
 async def test_en_locale_selects_the_english_assets() -> None:
     stub = StubLLM([dict(STRONG)])
@@ -162,8 +259,8 @@ async def test_unsupported_locale_clarifies_without_a_model_call() -> None:
 
 
 # -- the whole seam, zero network ---------------------------------------------
-def _orchestrator(tmp_path: Path, stub: StubLLM) -> Orchestrator:
-    store = Store(tmp_path / "front.db")
+def _orchestrator(tmp_path: Path, stub: StubLLM, name: str = "front") -> Orchestrator:
+    store = Store(tmp_path / f"{name}.db")
     return Orchestrator(store, load_static(), LlmFrontHalf(stub))
 
 

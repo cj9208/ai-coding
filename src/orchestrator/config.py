@@ -53,6 +53,20 @@ class Thresholds:
     CONSERVATIVE_TOPK_FACTOR = 1.5
 
 
+class FastPath:
+    """05c step 3 (B.2): skip the flash interpret call when the
+    deterministic pass alone carries strong evidence — a single alias
+    candidate at full specificity (05c §3; the eligibility test is exactly
+    ``strong_evidence``'s deterministic half, evaluated in ``interpret``).
+    Default off until the parity tests are trusted in production; the
+    safety gate runs before any path, deterministic or not (DP-2)."""
+
+    ENABLED = os.getenv("ORCHESTRATOR_FAST_PATH", "") == "1"
+    #: the synthesized proposal's task type — the whole "small
+    #: fast-path-eligible set" the plan asked for, in one constant
+    TASK_TYPE = "faq_howto"
+
+
 class Lifecycle:
     """Wait bounds DP-4 does not cover. Budgets account *machine* time; a
     human's answer latency is subtracted out (``wall_clock_paused_ms``), so

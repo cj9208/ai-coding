@@ -17,7 +17,13 @@ Seam discipline:
 - one ``interpret`` call = at most one model call, **awaited** — the
   async ``llm_client`` method is called directly (05a step 5: no
   ``asyncio.run`` inside the turn, which is what lets the harness be
-  embedded in an ASGI host).
+  embedded in an ASGI host);
+- the **deterministic fast path** (05c step 3, ``config.FastPath``) is
+  another proposer, not a bypass: it runs *after* the safety gate and
+  normalize, synthesizes the same ``ModelInterpretation`` contract
+  object from the alias evidence, and reports ``model_name="none"`` so
+  the quota gate counts it as the zero-spend pass it is. The harness
+  downstream cannot tell the difference — that is the parity contract.
 """
 
 from __future__ import annotations
@@ -28,7 +34,8 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from . import safety as safety_gate
-from .config import Models
+from .assess import STRONG_TOP_MATCH
+from .config import FastPath, Models
 from .contracts import (
     DeterministicSignals,
     FrontHalfOutput,
@@ -82,6 +89,26 @@ class ModelInterpretation(_Contract):
 _TASK_TYPES = "faq_howto | lookup | comparison | process_question | other"
 
 
+def _synthesize(norm: Any) -> ModelInterpretation | None:
+    """The fast path's zero-token proposal (05c step 3): eligible exactly
+    when the deterministic pass alone carries strong evidence — one
+    candidate at full specificity, the deterministic half of
+    ``assess.strong_evidence``. Everything the model would add (attributes,
+    questions, flags) is *absent because the input is unambiguous*, not
+    because the fast path voted on it; the booleans it synthesizes are the
+    same ones ``_assemble`` reads on the LLM path."""
+    top = norm.top_match_score
+    if norm.candidate_count != 1 or top is None or top < STRONG_TOP_MATCH:
+        return None
+    entity = norm.alias_hits[0]
+    return ModelInterpretation(
+        task_type=FastPath.TASK_TYPE,
+        target_entity_guess=entity,
+        interpretation_summary=f"deterministic alias hit: {entity}",
+        confidence=1.0,
+    )
+
+
 class LlmFrontHalf:
     """``FrontHalf`` implementation for production use (and for zero-network
     tests when given a stub ``client`` — see tests/test_orchestrator)."""
@@ -132,6 +159,24 @@ class LlmFrontHalf:
             )
 
         norm = normalize(f"{text} {answer}" if answer else text, aliases=pack.aliases)
+        if (
+            FastPath.ENABLED
+            and not escalated
+            and verdict.decision == SafetyDecision.allow
+        ):
+            # the gate and normalize ran first (DP-2); the fast path only
+            # replaces the *proposal*, and an escalation pass exists precisely
+            # because the model is wanted
+            synthesized = _synthesize(norm)
+            if synthesized is not None:
+                return self._assemble(
+                    envelope,
+                    norm,
+                    verdict,
+                    answer=answer,
+                    model=synthesized,
+                    model_name="none",
+                )
         model_name = Models.ESCALATED if escalated else Models.FLASH
         raw = await self.client.chat_json(
             self._prompt(pack, envelope, norm, answer, escalated),
