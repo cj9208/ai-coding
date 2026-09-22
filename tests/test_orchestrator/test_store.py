@@ -209,3 +209,73 @@ def test_llm_calls_today_reads_legacy_envelopes_as_zero(store: Store) -> None:
         )
     assert store.llm_calls_today("u1", now) == 2
     assert store.llm_calls_today("u1", now, exclude_request_id=env.request_id) == 0
+
+
+# -- handoff worklist (05d): a consumer of packets, never a mutation ----------
+def _seed_handoff(store: Store) -> tuple[RequestEnvelope, str]:
+    from orchestrator.capabilities.builtin import build_handoff_packet
+
+    env = RequestEnvelope.new(text="要人工介入的问题", user_id="u1")
+    store.create_request(env)
+    packet = build_handoff_packet(
+        env, reason_code="test", reason_summary="r", objects=[]
+    )
+    store.append_object(env.request_id, "handoff", packet, env.timestamp_start_ms)
+    return env, packet.handoff_id
+
+
+def test_ticket_is_open_until_claimed(store: Store) -> None:
+    env, hid = _seed_handoff(store)
+    assert store.get_ticket(hid) is None  # "open" is the absence of a row
+    ticket = store.claim_ticket(hid, "ops_a", env.timestamp_start_ms + 1)
+    assert ticket["ticket_status"] == "claimed"
+    assert ticket["assignee"] == "ops_a"
+    # request_id is derived from the persisted packet, not passed in
+    assert ticket["request_id"] == env.request_id
+
+
+def test_claim_requires_a_real_packet(store: Store) -> None:
+    with pytest.raises(ValueError, match="unknown handoff"):
+        store.claim_ticket("handoff_nope", "ops_a", 1)
+
+
+def test_claim_is_yours_until_reassigned(store: Store) -> None:
+    env, hid = _seed_handoff(store)
+    store.claim_ticket(hid, "ops_a", env.timestamp_start_ms)
+    # re-claiming by the same assignee is idempotent; by another is a race
+    store.claim_ticket(hid, "ops_a", env.timestamp_start_ms + 5)
+    with pytest.raises(ValueError, match="claimed by ops_a"):
+        store.claim_ticket(hid, "ops_b", env.timestamp_start_ms + 6)
+    ticket = store.claim_ticket(hid, "ops_b", env.timestamp_start_ms + 7, reassign=True)
+    assert ticket["assignee"] == "ops_b"
+
+
+def test_resolve_follows_the_claim_and_the_claimant(store: Store) -> None:
+    env, hid = _seed_handoff(store)
+    with pytest.raises(ValueError, match="open"):
+        store.resolve_ticket(hid, "ops_a", "note", env.timestamp_start_ms)
+    store.claim_ticket(hid, "ops_a", env.timestamp_start_ms)
+    with pytest.raises(ValueError, match="not ops_b"):
+        store.resolve_ticket(hid, "ops_b", "note", env.timestamp_start_ms + 1)
+    ticket = store.resolve_ticket(
+        hid, "ops_a", "已电话答复", env.timestamp_start_ms + 2
+    )
+    assert ticket["ticket_status"] == "resolved"
+    assert ticket["resolution"] == "已电话答复"
+    with pytest.raises(ValueError, match="already resolved"):
+        store.resolve_ticket(hid, "ops_a", "again", env.timestamp_start_ms + 3)
+    with pytest.raises(ValueError, match="already resolved"):
+        store.claim_ticket(hid, "ops_c", env.timestamp_start_ms + 4)
+
+
+def test_worklist_churn_leaves_the_packet_byte_identical(store: Store) -> None:
+    """DP-3's freeze, pinned: the worklist is a *consumer* of persisted
+    packets — after the full claim/reassign/resolve lifecycle the stored
+    packet payload is exactly the bytes written at creation."""
+    env, hid = _seed_handoff(store)
+    before = store.objects(env.request_id)[0]["payload"]
+    store.claim_ticket(hid, "ops_a", env.timestamp_start_ms)
+    store.claim_ticket(hid, "ops_b", env.timestamp_start_ms, reassign=True)
+    store.resolve_ticket(hid, "ops_b", "done", env.timestamp_start_ms)
+    after = store.objects(env.request_id)[0]["payload"]
+    assert after == before

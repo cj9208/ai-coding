@@ -2,8 +2,11 @@
 
 ``ask`` is the only command that hits an LLM (via the M1 front half); every
 other subcommand stays deterministic: ``status`` / ``replay`` /
-``handoff list|export`` / ``golden run``. Mirrors ``rag.cli``: argparse
-subcommands, ``main(argv) -> int``, no module-level side effects.
+``handoff list|export|worklist|claim|resolve`` / ``golden run``. The
+worklist half (05d) is a *consumer* of persisted packets — no command
+here touches the state machine or mutates a packet (DP-3). Mirrors
+``rag.cli``: argparse subcommands, ``main(argv) -> int``, no
+module-level side effects.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from .capabilities.builtin import render_handoff_markdown
 from .config import DB_PATH
 from .contracts import HandoffPacket
 from .golden import load_cases, run_cases
+from .runtime import _now_ms
 from .store import Store
 
 DEFAULT_GOLDEN_FILE = REPO_ROOT / "config" / "orchestrator" / "golden_cases.jsonl"
@@ -76,6 +80,25 @@ def _build_parser() -> argparse.ArgumentParser:
     hx = hs.add_parser("export", help="render the six-section markdown packet")
     hx.add_argument("handoff_id")
     hx.set_defaults(func=_cmd_handoff_export)
+    wl = hs.add_parser("worklist", help="packets as owned work: open/claimed/resolved")
+    wl.add_argument(
+        "--all", action="store_true", help="include resolved tickets (default: not)"
+    )
+    wl.set_defaults(func=_cmd_handoff_worklist)
+    cl = hs.add_parser("claim", help="take ownership of a handoff packet")
+    cl.add_argument("handoff_id")
+    cl.add_argument("--assignee", required=True)
+    cl.add_argument(
+        "--reassign",
+        action="store_true",
+        help="take over a packet someone else claimed",
+    )
+    cl.set_defaults(func=_cmd_handoff_claim)
+    rsv = hs.add_parser("resolve", help="close a claimed ticket with a note")
+    rsv.add_argument("handoff_id")
+    rsv.add_argument("--assignee", required=True, help="must be the claimant")
+    rsv.add_argument("--note", required=True)
+    rsv.set_defaults(func=_cmd_handoff_resolve)
 
     p = sub.add_parser("golden", help="run golden regression cases")
     gs = p.add_subparsers(dest="golden_command", required=True)
@@ -189,6 +212,54 @@ def _cmd_handoff_list(store: Store, args: argparse.Namespace) -> int:
             f"{row['payload'].get('handoff_id')}  req={row['request_id']}"
             f"  reason={reason.get('code')}"
         )
+    return 0
+
+
+def _cmd_handoff_worklist(store: Store, args: argparse.Namespace) -> int:
+    rows = store.objects_of_kind("handoff", limit=200)
+    if not rows:
+        print("no handoffs")
+        return 0
+    shown = 0
+    for row in rows:
+        hid = str(row["payload"].get("handoff_id"))
+        ticket = store.get_ticket(hid)
+        status = ticket["ticket_status"] if ticket else "open"
+        if status == "resolved" and not args.all:
+            continue
+        assignee = ticket["assignee"] if ticket else "-"
+        print(
+            f"{hid}  {status:<8} {assignee:<16} req={row['request_id']}"
+            f"  reason={row['payload'].get('reason', {}).get('code')}"
+            f"  {row['created_at_ms']}"
+        )
+        shown += 1
+    if not shown:
+        print("worklist empty (resolved tickets hidden without --all)")
+    return 0
+
+
+def _cmd_handoff_claim(store: Store, args: argparse.Namespace) -> int:
+    try:
+        ticket = store.claim_ticket(
+            args.handoff_id, args.assignee, _now_ms(), reassign=args.reassign
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"claimed {ticket['handoff_id']} for {ticket['assignee']}")
+    return 0
+
+
+def _cmd_handoff_resolve(store: Store, args: argparse.Namespace) -> int:
+    try:
+        ticket = store.resolve_ticket(
+            args.handoff_id, args.assignee, args.note, _now_ms()
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"resolved {ticket['handoff_id']} by {ticket['assignee']}")
     return 0
 
 

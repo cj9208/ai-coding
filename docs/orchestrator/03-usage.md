@@ -92,6 +92,28 @@ Deterministic re-read of persisted data; never touches an LLM.
   ticket system exists later. The packet is a *persisted object*, so
   export works in a different process, days later, with no live state.
 
+## `orchestrate handoff worklist` / `claim` / `resolve` (05d)
+
+The worklist turns packets into owned, resolvable work without touching
+them (contract record G-2 — packets are only ever read; the state
+machine never sees a ticket row):
+
+- `worklist [--all]`: every packet joined to its ticket —
+  `handoff_id  status  assignee  req=...  reason=...`; "open" means no
+  ticket row exists, and resolved rows hide unless `--all`.
+- `claim <handoff_id> --assignee OPS [--reassign]`: take an open
+  packet; claiming another operator's packet fails unless `--reassign`
+  makes the takeover explicit; unknown ids fail (the packet is read to
+  prove existence, and its `request_id` lands on the ticket).
+- `resolve <handoff_id> --assignee OPS --note "..."`: close a *claimed*
+  ticket; only the claimant may resolve, and resolving an open ticket
+  is refused — an unowned resolution is the black hole with a
+  timestamp, which is the whole thing this table exists to prevent.
+
+`--assignee` is self-asserted at the CLI until 05b's identity step
+lands on the service host; tenant scoping of the worklist rides the
+same step (the table already carries `request_id`).
+
 ## `orchestrate golden run [--file CASES.jsonl]`
 
 The zero-LLM regression: replays scripted cases through the real runtime

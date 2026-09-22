@@ -56,6 +56,85 @@ def test_handoff_empty_then_export(tmp_path: Path) -> None:
     assert main(["--db", str(db), "handoff", "export", "handoff_nope"]) == 1
 
 
+def test_handoff_worklist_claim_resolve_lifecycle(tmp_path: Path, capsys) -> None:
+    from orchestrator.capabilities.builtin import build_handoff_packet
+    from orchestrator.contracts import RequestEnvelope
+
+    db = tmp_path / "wl.db"
+    store = Store(db)
+    env = RequestEnvelope.new(text="需要人工的问题", user_id="u1")
+    store.create_request(env)
+    packet = build_handoff_packet(
+        env, reason_code="test", reason_summary="r", objects=[]
+    )
+    store.append_object(env.request_id, "handoff", packet, env.timestamp_start_ms)
+    store.close()
+    hid = packet.handoff_id
+
+    assert main(["--db", str(db), "handoff", "worklist"]) == 0
+    out = capsys.readouterr().out
+    assert hid in out and "open" in out
+
+    # resolve before claim is refused; claim then resolve closes it
+    assert (
+        main(
+            [
+                "--db",
+                str(db),
+                "handoff",
+                "resolve",
+                hid,
+                "--assignee",
+                "ops_a",
+                "--note",
+                "x",
+            ]
+        )
+        == 1
+    )
+    assert main(["--db", str(db), "handoff", "claim", hid, "--assignee", "ops_a"]) == 0
+    assert "claimed" in capsys.readouterr().out
+    assert main(["--db", str(db), "handoff", "claim", hid, "--assignee", "ops_b"]) == 1
+    assert (
+        main(
+            [
+                "--db",
+                str(db),
+                "handoff",
+                "claim",
+                hid,
+                "--assignee",
+                "ops_b",
+                "--reassign",
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "--db",
+                str(db),
+                "handoff",
+                "resolve",
+                hid,
+                "--assignee",
+                "ops_b",
+                "--note",
+                "已处理",
+            ]
+        )
+        == 0
+    )
+
+    # resolved hides by default, shows with --all
+    capsys.readouterr()  # drain the claim/resolve echoes
+    assert main(["--db", str(db), "handoff", "worklist"]) == 0
+    assert hid not in capsys.readouterr().out
+    assert main(["--db", str(db), "handoff", "worklist", "--all"]) == 0
+    assert hid in capsys.readouterr().out
+
+
 def test_golden_run_on_default_file() -> None:
     assert main(["golden", "run"]) == 0
 

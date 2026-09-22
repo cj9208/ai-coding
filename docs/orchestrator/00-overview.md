@@ -78,8 +78,14 @@ ask it questions; the contract first if you intend to *change* behavior;
   amendment), and the deterministic fast path behind
   `ORCHESTRATOR_FAST_PATH=1` (default off, parity-tested: same input,
   identical fired row-ids, zero model calls). The answer cache stays
-  parked per the model until traffic prices its hit rate. 05d awaits
-  its triggers.
+  parked per the model until traffic prices its hit rate. **05d steps
+  1–2 landed too**: the erasure question is *decided* (contract record
+  G-1 — crypto-erase, effective at the first EU/PIPL tenant) and the
+  handoff black hole has an owner-side half (record G-2 —
+  `handoff_tickets` + `worklist/claim/resolve`, packets provably
+  unmutated, state machine untouched; the `handoff → routing` recovery
+  edge stays the owed DP-3 conversation). 05b's identity/idempotency,
+  05d's registry governance and config-as-release await their triggers.
   04 carries a **problem status ledger** — read it first for
   per-problem state.
 

@@ -82,7 +82,10 @@ No ticket system, no email, no queue service. `handoff-list` and
 `handoff-export <handoff_id>` produce a scan-friendly markdown packet (the
 six CH01 packet sections mapped onto the handoff object's fields). This is
 enough to close the loop later with any external system, and keeps the first
-version dependency-free.
+version dependency-free. *Amended 2026-09-22 (G-2):* a worklist table may
+*consume* packets (claim/resolve ownership, packets never mutated, no
+state-machine edge) without breaking this freeze — the freeze was about
+the packet's semantics, not about leaving them unowned.
 
 ### DP-4. Budget defaults are relaxed for a CLI + retrieval runtime
 
@@ -348,6 +351,29 @@ with zero row edits.
   `data_key_id` column on `requests`), not the key-management product
   choice. Until the trigger, erasure stays under "Explicitly Not Doing".
 
+### Record G-2: the handoff worklist (05d step 2, 2026-09-22)
+
+A fourth table, `handoff_tickets`, amends "Persistence" as a pure
+**consumer** of persisted packets — DP-3's "packet + export, nothing
+more" is deliberately kept: packets are only ever *read* (claim derives
+its `request_id` from the stored packet and refuses unknown ids; no
+write path to `runtime_objects` exists here), and worklist rows never
+enter the state machine — the absent `handoff → routing` edge remains a
+DP-3 contract conversation, not coded around.
+
+Semantics fixed by this record:
+
+- **open is the absence of a row**: creating a packet can never race a
+  claim, and pre-worklist packets need no backfill; the worklist is the
+  join of stored packets onto ticket rows;
+- the lifecycle is claim → resolve: resolving an open ticket is refused
+  (an unowned resolution is the black hole with a timestamp), only the
+  claimant may resolve, and `--reassign` makes takeover explicit;
+- assignee is operator-self-asserted at the CLI until 05b's identity
+  lands on the service host, and tenant scoping of the worklist ride
+  the same 05b step — the table carries `request_id`, so the join to a
+  future tenant column is already there.
+
 ## Control Loop
 
 Every return to `routing` runs CH02_02's four steps, in code:
@@ -438,6 +464,9 @@ Two tables in `data/orchestrator/orchestrator.db`:
   order).
 - `events(id INTEGER PK, request_id, event, payload_json, ts)` — derived
   projection for replay/monitoring; snapshots remain source of truth.
+- `handoff_tickets(handoff_id PK, request_id, assignee, claimed_at_ms,
+  resolved_at_ms, resolution)` — the worklist (G-2): consumers of
+  packets, outside the state machine; no row means open.
 
 Replay = read objects for `request_id`, re-render the decision path; golden
 regression = re-run a case through the runtime and diff emitted
@@ -453,6 +482,9 @@ orchestrate status [req_id]                   # request list / one-request timel
 orchestrate replay req_id                     # decision path reconstructed from store
 orchestrate handoff list
 orchestrate handoff export <handoff_id> --out packet.md
+orchestrate handoff worklist [--all]           # open/claimed/resolved (G-2)
+orchestrate handoff claim <handoff_id> --assignee ops [--reassign]
+orchestrate handoff resolve <handoff_id> --assignee ops --note "..."
 orchestrate golden run [--class routing|permission|...]
 orchestrate registry check                    # validate capabilities.yaml against the entry schema
 ```

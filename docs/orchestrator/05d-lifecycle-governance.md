@@ -3,10 +3,12 @@
 Status: **executing 2026-09-22** — step 1 landed: the erasure decision
 is recorded in the contract ("Governance Records", record G-1:
 crypto-erase, effective at the first EU/PIPL tenant with legal
-sign-off). Derived from `04-scaling.md`; one of four sub-plans
-(05a–05d). Suggested execution order: **4th** — most of its items are
-decisions to be made on schedule, not code to be written early; the
-capability-health signal joined late (04 ledger, §6c).
+sign-off); step 2 landed: the handoff worklist (`handoff_tickets` +
+`worklist|claim|resolve`, contract record G-2). Derived from
+`04-scaling.md`; one of four sub-plans (05a–05d). Suggested execution
+order: **4th** — most of its items are decisions to be made on
+schedule, not code to be written early; the capability-health signal
+joined late (04 ledger, §6c).
 
 **One sentence:** decide the three governance questions the code cannot
 answer by itself (erasure, registry fields, config-as-release) and
@@ -92,6 +94,28 @@ keeps that freeze intact:
   (DP-3 amendment)** tracked here, not coded around;
 - multi-tenancy: assignee scope comes from 05b's identity context.
 
+**Landed 2026-09-22 (contract record G-2; deltas from the sketch
+above):**
+
+- "open" is implemented as **the absence of a ticket row**, not a
+  status value: creating a packet can never race a claim, and packets
+  persisted before the worklist existed appear correctly without any
+  backfill. `status` on the row is therefore derived
+  (claimed/resolved), and the worklist output is a join of stored
+  packets onto ticket rows.
+- `claim` reads the packet only to prove existence and derive its
+  `request_id` — there is no write path to `runtime_objects` in this
+  table, so DP-3's freeze is structural, not a convention. Pinned by
+  `test_worklist_churn_leaves_the_packet_byte_identical` (payload
+  after the full claim/reassign/resolve cycle equals the payload at
+  creation); the packet-immutability check is a pytest, not a golden,
+  because goldens exercise routing rows and the worklist has none.
+- takeover is explicit (`--reassign`), and resolve requires the
+  claimant — the claim→resolve order is what stops the worklist from
+  becoming a timestamped black hole.
+- No state-machine touch, assertable: `runtime.py` is outside the diff
+  (`LEGAL_TRANSITIONS` unchanged); worklist rows never enter the loop.
+
 ### 3. Registry governance — contract conversation
 
 Four catalog fields exist *for* governance — `rollout_status`,
@@ -144,8 +168,9 @@ hammer a dead peer.
 1. ✅ Erasure decision record in the contract (2026-09-22, record G-1:
    crypto-erase chosen over tombstone, effective date = first EU/PIPL
    tenant with legal sign-off; implementation stays gated there).
-2. `handoff_tickets` table + `claim|resolve|worklist` CLI + goldens
-   asserting packets are byte-identical before/after worklist use.
+2. ✅ `handoff_tickets` + `claim|resolve|worklist` CLI + immutability
+   tests (2026-09-22, record G-2; the packet-unchanged assertion is a
+   pytest, not a golden — see §2 notes).
 3. `envelope.config_hash` + replay display + release-checklist section
    in `03-usage.md`.
 4. Registry-governance decision record (drafted when entries > ~20;
@@ -157,11 +182,12 @@ hammer a dead peer.
 
 ## Verification
 
-- Goldens: worklist claim/resolve lifecycle; packet immutability under
-  worklist churn; `config_hash` present on new envelopes and shown by
-  `replay`.
-- Suite green; no state-machine transition changes (assertable: the
-  `LEGAL_TRANSITIONS` map is untouched by the diff).
+- ✅ Goldens → replaced by tests: worklist claim/resolve lifecycle
+  (store + CLI), unknown-packet refusal, reassign/claimant rules, and
+  packet immutability under worklist churn.
+- ✅ Suite green; no state-machine transition changes (asserted: the
+  worklist diff touches `store.py`/`cli.py` only; `LEGAL_TRANSITIONS`
+  in `runtime.py` is untouched).
 
 ## Non-goals
 

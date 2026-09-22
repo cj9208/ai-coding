@@ -22,7 +22,9 @@ contract's per-milestone Implementation Notes are the official record of
  policy.py       286   3 decision tables + fallback rows, as Row data
  assess.py       180   envelope+output -> signal objects; caps; wall clock
  registry.py     148   Registry + load_yaml / load_default / load_static
- store.py        384   3-table SQLite persistence (via src/storage)
+ store.py        503   4-table SQLite persistence (via src/storage) —
+                       the 4th is the 05d handoff worklist (tickets
+                       consume packets; open = no row; never a mutation)
  ids.py           28   Crockford base32 ms+random ids, lexicographically
                        time-sortable
 
@@ -49,7 +51,8 @@ contract's per-milestone Implementation Notes are the official record of
 
  THE REGRESSION SURFACE
  golden.py       215   case loader + scripted replay + decision diff
- cli.py          235   orchestrate: ask/status/replay/handoff/golden/registry
+ cli.py          306   orchestrate: ask/status/replay/handoff
+                       (list|export|worklist|claim|resolve)/golden/registry
 ```
 
 Imports are one-directional: `cli` → `runtime`/`registry`/`interpret` →
@@ -162,10 +165,14 @@ for `registry check`); `SearchQuery` tokens go through the shared
 
 ## Persistence (store.py)
 
-Three tables via `storage.SqliteClient` (WAL, PRAGMA from the shared
+Four tables via `storage.SqliteClient` (WAL, PRAGMA from the shared
 layer): `requests` (envelope JSON + denormalized `status` for listing),
 `runtime_objects` (`kind`, per-request `seq`, payload JSON — append-only),
-`events` (the ordered narrative `replay` reconstructs). The envelope is
+`events` (the ordered narrative `replay` reconstructs), and
+`handoff_tickets` (05d worklist — a pure consumer of persisted packets:
+claim reads a packet to prove existence and copy its `request_id`, no
+code path here writes `runtime_objects`, and no ticket row means open).
+The envelope is
 reloaded, never patched in place across processes; `update_request` writes
 the whole blob at each transition — small rows, total consistency.
 

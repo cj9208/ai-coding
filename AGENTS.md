@@ -235,6 +235,10 @@ are already there). Env convention lives only in
   `ORCHESTRATOR_FAST_PATH=1` (default off; parity test: same input both
   paths fires identical row ids, fast path spends zero calls) — the
   answer cache is parked by the model's NO-GO until real traffic prices
-  its hit rate. The service host that would consume the
+  its hit rate. **05d steps 1–2 landed**: the contract's new "Governance
+  Records" section holds G-1 (erasure decided — crypto-erase, effective at
+  the first EU/PIPL tenant) and G-2 (handoff worklist: `handoff_tickets` +
+  `worklist|claim|resolve`, a pure consumer of unmutated packets, no
+  state-machine edge). The service host that would consume the
   rest is unbuilt; remaining 05b–05d steps are gated on their triggers.
   The contract stays the decisions authority.

@@ -1,7 +1,9 @@
-"""SQLite persistence for the runtime — three tables (see design
+"""SQLite persistence for the runtime — four tables (see design
 "Persistence"): ``requests`` (envelope, authoritative root), ``runtime_objects``
 (append-only projections of the other per-request objects), ``events`` (a
-derived replay/monitoring projection). Snapshots in ``requests``/
+derived replay/monitoring projection), ``handoff_tickets`` (the 05d
+worklist — a consumer of persisted packets that never mutates them).
+Snapshots in ``requests``/
 ``runtime_objects`` are the source of truth; events never are.
 
 Uses the shared :class:`storage.SqliteClient` so WAL/foreign-key PRAGMAs are
@@ -61,6 +63,18 @@ CREATE INDEX IF NOT EXISTS ix_objects_kind ON runtime_objects (kind, created_at_
 -- envelopes summed via json_extract (05c). Day-grain, so the window scan
 -- is tiny and the index keeps it that way at Case A row counts
 CREATE INDEX IF NOT EXISTS ix_requests_user_created ON requests (user_id, created_at_ms);
+-- the handoff worklist (05d): a CONSUMER of persisted handoff packets,
+-- never a mutation of them (DP-3 stands). A packet with no row here is
+-- simply an open ticket — "open" is the absence of a row, so creating a
+-- packet can never race a claim and pre-worklist packets need no backfill.
+CREATE TABLE IF NOT EXISTS handoff_tickets (
+    handoff_id    TEXT PRIMARY KEY,
+    request_id    TEXT NOT NULL,
+    assignee      TEXT NOT NULL,
+    claimed_at_ms INTEGER NOT NULL,
+    resolved_at_ms INTEGER,
+    resolution    TEXT
+);
 """
 
 #: day bucket for the quota gate (05c): UTC calendar day — deliberate v1
@@ -332,6 +346,111 @@ class Store:
             }
             for r in rows
         ]
+
+    # --- handoff worklist (05d) ------------------------------------------------
+    def _packet_row(self, handoff_id: str) -> str | None:
+        """The request a persisted packet belongs to, or None if no such
+        packet exists. One scan serves both the existence gate and the
+        ticket's request_id — the packet is only ever *read* here."""
+        with self._read() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT request_id FROM runtime_objects"
+                    " WHERE kind = 'handoff'"
+                    " AND json_extract(payload_json, '$.handoff_id') = :hid"
+                    " LIMIT 1"
+                ),
+                {"hid": handoff_id},
+            ).first()
+        return str(row[0]) if row else None
+
+    def get_ticket(self, handoff_id: str) -> dict[str, Any] | None:
+        """The ticket row for a packet, or None — None means open (the
+        status is the absence of a row, never a mutated packet)."""
+        with self._read() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT request_id, assignee, claimed_at_ms, resolved_at_ms,"
+                    " resolution FROM handoff_tickets WHERE handoff_id = :hid"
+                ),
+                {"hid": handoff_id},
+            ).first()
+        if row is None:
+            return None
+        return {
+            "handoff_id": handoff_id,
+            "request_id": row[0],
+            "assignee": row[1],
+            "claimed_at_ms": row[2],
+            "resolved_at_ms": row[3],
+            "resolution": row[4],
+            "ticket_status": "resolved" if row[3] is not None else "claimed",
+        }
+
+    def claim_ticket(
+        self, handoff_id: str, assignee: str, now_ms: int, *, reassign: bool = False
+    ) -> dict[str, Any]:
+        """Claim an open packet, or (with ``reassign``) take a claimed one
+        over. The packet is only read to prove it exists — DP-3's freeze
+        is the point of this table, not an obstacle to it."""
+        packet_request = self._packet_row(handoff_id)
+        if packet_request is None:
+            raise ValueError(f"unknown handoff: {handoff_id}")
+        existing = self.get_ticket(handoff_id)
+        if existing is not None:
+            if existing["ticket_status"] == "resolved":
+                raise ValueError(f"ticket {handoff_id} is already resolved")
+            if existing["assignee"] != assignee and not reassign:
+                raise ValueError(
+                    f"ticket {handoff_id} is claimed by {existing['assignee']}"
+                    " (pass reassign to take it over)"
+                )
+        with self._write() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO handoff_tickets (handoff_id, request_id, assignee,"
+                    " claimed_at_ms) VALUES (:hid, :rid, :who, :c)"
+                    " ON CONFLICT(handoff_id) DO UPDATE SET assignee = :who,"
+                    " claimed_at_ms = :c"
+                ),
+                {
+                    "hid": handoff_id,
+                    "rid": packet_request,
+                    "who": assignee,
+                    "c": now_ms,
+                },
+            )
+        ticket = self.get_ticket(handoff_id)
+        assert ticket is not None
+        return ticket
+
+    def resolve_ticket(
+        self, handoff_id: str, assignee: str, note: str, now_ms: int
+    ) -> dict[str, Any]:
+        """Resolve a *claimed* ticket — the claim-then-resolve order is the
+        whole point of the worklist (an unowned resolution is the black
+        hole with a timestamp)."""
+        existing = self.get_ticket(handoff_id)
+        if existing is None:
+            raise ValueError(f"ticket {handoff_id} is open — claim it before resolving")
+        if existing["ticket_status"] == "resolved":
+            raise ValueError(f"ticket {handoff_id} is already resolved")
+        if existing["assignee"] != assignee:
+            raise ValueError(
+                f"ticket {handoff_id} is claimed by {existing['assignee']},"
+                f" not {assignee}"
+            )
+        with self._write() as conn:
+            conn.execute(
+                text(
+                    "UPDATE handoff_tickets SET resolved_at_ms = :r, resolution = :n"
+                    " WHERE handoff_id = :hid"
+                ),
+                {"r": now_ms, "n": note, "hid": handoff_id},
+            )
+        ticket = self.get_ticket(handoff_id)
+        assert ticket is not None
+        return ticket
 
     # --- events --------------------------------------------------------------
     def emit(self, request_id: str, event: str, now_ms: int, **payload: Any) -> None:

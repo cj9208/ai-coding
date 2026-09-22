@@ -62,7 +62,7 @@ only prose here.
 | §3 cost/quota | **fixed (quota gate) + economically hardened (fast path)** — per-user daily LLM-call allowance enforced by routing row r10 via a contract amendment; deterministic fast path landed behind a default-off flag with the parity test; cost model written (05c §1) with the step-3 GO / step-4 NO-GO verdicts | 05c steps 1–3 (2026-09-22); the per-*money* (token) ledger, per-tenant allowances, and the parked answer cache ride on the service host |
 | §4 tenancy/identity | **open** — tenant column still absent, `handoff list` still returns every user's packets | 05b |
 | §5a clarification never expires | **fixed** — 7-day TTL, resume-past-TTL forces clean re-interpret, `clarification_expired` event keeps it auditable | 05a step 2 |
-| §5b handoff black hole | **open** — no worklist, no recovery edge (DP-3 conversation) | 05d |
+| §5b handoff black hole | **worklist fixed** — `handoff_tickets` + `worklist/claim/resolve` (05d step 2, contract record G-2): packets become owned work, packets themselves stay byte-identical (tested), state machine untouched; **the recovery edge stays open** by design — `handoff → routing` needs a DP-3 amendment | 05d step 2 (2026-09-22); DP-3 conversation owed |
 | §6a unindexed cross-request reads | **fixed & measured** — two indexes; `list_requests(20)` P50 188 ms → <1 ms at 100k rows | 05a steps 2, 4 |
 | §6b stale `RagStore` handle | **fixed** — handle reopens when the kb file's `(mtime_ns, size)` changes; in-process publishes stay visible through the cached handle | 05a step 5 (E); 05c's answer cache now has its version key to build on |
 | §6c no circuit breaker (`health: degraded`) | **open — now owned**: adopted by 05d (design sketch 5, step 5) after this ledger found it in no sub-plan | 05d, triggered by a capability with real external deps behind the service host |
@@ -72,7 +72,7 @@ only prose here.
 | A.3 erasure law vs append-only | **decided, unbuilt** — contract record G-1 (2026-09-22): crypto-erase (per-user data keys, zero row edits, DP-7 audit untouched), effective at the first EU/PIPL tenant with legal sign-off; implementation stays gated on that date | 05d step 1 (decision) done; code awaits the trigger |
 | A.4 config-as-release | **open** | 05d |
 | A.5 batching → Postgres, in that order | **batching done; Postgres closed as "won't trigger"** for pilot-A throughput, with named reopen conditions | 05a steps 3–4 (verdict) |
-| A.6 handoff = headcount | **open** | 05d |
+| A.6 handoff = headcount | **half fixed** — packets now have owners and a resolution trail (G-2 worklist); staffing signals (open-ticket depth per assignee/tenant) need the host's metrics surface and 05b identity | 05d step 2 (2026-09-22) + host |
 | B.1 adversarial input | **hardened (harness side)** — adversarial test class landed; two real holes found + fixed (ungated resume answer, model-revocable gate constraint); regex-gate ceilings recorded, gateway contract written | 05b steps 4–5 (2026-09-22); authN/rate-limit enforcement awaits a deployment |
 | B.2 LLM call as economic decision | **hardened economically** — quota gate landed (05c step 2) + deterministic fast path landed behind a default-off flag, parity-tested (step 3); answer cache **parked** per the cost model's NO-GO (hit rate unmeasured, no long-lived host) | 05c steps 1–3 (2026-09-22); cache reopens when real traffic can price its hit rate |
 | B.3 no idempotency | **open** — one envelope field + one uniqueness check, unbuilt | 05b, before public traffic |
@@ -243,6 +243,12 @@ time it exists.
   state machine. A handoff *worklist table* is additive (it is a
   consumer of persisted packets, not a change to them); the recovery
   edge is a contract conversation, not code.
+  *(Worklist landed 2026-09-22 (05d step 2, contract record G-2):
+  `handoff_tickets` where no row means open — claim never races packet
+  creation and old packets need no backfill — plus
+  `handoff worklist/claim/resolve`; packet immutability under worklist
+  churn is a test, and the state machine is outside the diff. The
+  recovery edge remains the owed DP-3 conversation.)*
 - **`awaiting_clarification` never expires**: DP-4 correctly accounts
   human wait out of the wall clock, and the side effect is a request
   from 6 months ago is resumable — against a registry, alias table and
