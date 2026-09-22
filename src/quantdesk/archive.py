@@ -34,7 +34,12 @@ from pathlib import Path
 from typing import Callable, NamedTuple
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from .config import Dataset, paths
 
@@ -144,6 +149,9 @@ def sha256_file(path: Path) -> str:
 @retry(
     reraise=True,
     stop=stop_after_attempt(3),
+    # a 404 is a durable answer, not a transient failure — retrying it
+    # tripled the cost of every missing month during the backfill
+    retry=retry_if_not_exception_type(RemoteMissing),
     wait=wait_exponential(multiplier=1, min=1, max=10),
 )
 def http_get(url: str, timeout: float = 120.0) -> httpx.Response:
