@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ photo.rel_path }}{% endblock %}
+{% block content %}
+<p><a href="/">&larr; 返回时间线</a></p>
+<div class="detail">
+  <img class="preview" src="/photo/{{ photo.id }}/preview.webp" alt="">
+  <table class="meta">
+    <tr><th>路径</th><td>{{ photo.rel_path }}</td></tr>
+    <tr><th>拍摄时间</th>
+        <td>{{ photo.effective_taken.strftime('%Y-%m-%d %H:%M:%S') }}
+            {%- if photo.taken_at is none %}（无 EXIF，取自文件时间）{% endif %}</td></tr>
+    <tr><th>设备</th><td>{{ (photo.make or '') ~ ' ' ~ (photo.model or '') or '未知' }}</td></tr>
+    <tr><th>尺寸</th><td>{{ photo.width }} × {{ photo.height }}</td></tr>
+    <tr><th>大小</th><td>{{ '%.1f' % (photo.size / 1048576) }} MB</td></tr>
+    <tr><th>SHA-256</th><td><code>{{ photo.content_hash }}</code></td></tr>
+    <tr><th>状态</th><td>{{ photo.state }}</td></tr>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+body { font-family: system-ui, sans-serif; margin: 0; color: #222; background: #fafafa; }
+header { display: flex; justify-content: space-between; align-items: baseline;
+         padding: 10px 20px; background: #fff; border-bottom: 1px solid #ddd; }
+.brand { font-weight: 700; text-decoration: none; color: inherit; }
+.mode { font-size: 12px; color: #888; }
+main { padding: 16px 20px 40px; }
+.day h2 { font-size: 16px; margin: 20px 0 8px; }
+.day h2 small { color: #999; font-weight: 400; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.cell img { width: 100%; height: 140px; object-fit: cover; display: block; border-radius: 4px; background: #eee; }
+.detail { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+.preview { max-width: 70vw; max-height: 80vh; border-radius: 4px; }
+.meta { border-collapse: collapse; font-size: 14px; }
+.meta th { text-align: left; color: #777; padding: 4px 12px 4px 0; font-weight: 500; vertical-align: top; }
+.meta td { padding: 4px 0; }
+.empty, .error-box { color: #666; margin-top: 40px; }
+.error-box pre { background: #fff3f3; border: 1px solid #e8b4b4; padding: 12px; white-space: pre-wrap; }

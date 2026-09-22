@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+{% if root_error %}
+<div class="error-box">
+  <h2>照片根目录不可访问</h2>
+  <pre>{{ root_error }}</pre>
+</div>
+{% elif not days %}
+<p class="empty">库里还没有照片——先运行 <code>photos scan</code>。</p>
+{% endif %}
+
+{% for day, photos in days %}
+<section class="day">
+  <h2>{{ day }} <small>{{ photos|length }} 张</small></h2>
+  <div class="grid">
+    {% for p in photos %}
+    <a class="cell" href="/photo/{{ p.id }}" title="{{ p.rel_path }}">
+      <img src="/photo/{{ p.id }}/thumb.webp" loading="lazy" alt="">
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

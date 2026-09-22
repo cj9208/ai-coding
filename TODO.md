@@ -72,6 +72,15 @@ the four remaining questions are recorded as resolved-as-deferred in
       `uv run quant record --streams liquidations --minutes 10` from a network
       where futures WS works and check `data/quantdesk/recorded/liquidations/`
       is non-empty.
+- [ ] **photo_desk: one real HEIC read + one NAS-mounted scan.** M0 is verified
+      on a generated JPEG/PNG tree only: this machine's pillow-heif wheel
+      decodes but cannot encode, so no `.heic` fixture exists, and
+      `PHOTO_ROOT` has never pointed at a live Synology share. After the NAS
+      arrives: `uv run photos scan --root <mounted> --data-dir <out>` over a
+      few hundred real photos (check EXIF/GPS parse and first-scan wall clock
+      over SMB), open one iPhone burst in the timeline and confirm HEIC
+      thumbnails render — this also closes the burst-identifier field check
+      (`docs/photo-desk-design.md` §6-3) that M1 grouping depends on.
 
 ## Next, if the demand is real
 
