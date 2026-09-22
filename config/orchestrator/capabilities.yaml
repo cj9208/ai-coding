@@ -1,0 +1,96 @@
+# Capability registry (CH02_01 object 7 as config — design §Registry).
+#
+# One entry per capability; `registry.load_yaml` enforces every field in
+# CapabilityCatalogEntry.REQUIRED_FIELDS at load, so a half-written entry
+# fails `orchestrate registry check` instead of misrouting at runtime.
+# DP-5: selection is task_type -> entry, single level; domain_scope is
+# ownership metadata only. loading_mode: only single_capability in v1.
+#
+# Implementations are bound by name in registry.load_default():
+#   rag_query          -> orchestrator.capabilities.rag.RagQueryCapability
+#   structured_lookup  -> orchestrator.capabilities.lookup.StructuredLookupCapability
+#   human_handoff      -> no impl on purpose: escalation is a persisted packet
+#                         (capabilities/builtin), not a runnable capability.
+# The echo/test fixtures stay in code (registry.load_static) — this file is
+# the production view.
+
+capabilities:
+  - name: rag_query
+    display_name: 知识库问答
+    owner: platform
+    domain_scope: knowledge
+    capability_version: "0.1.0"
+    rollout_status: active
+    purpose: cited answers over the built rag corpus (src/rag, lexical FTS5)
+    task_types_supported: ["*"]
+    required_inputs: [normalized_query]
+    optional_inputs: [requested_attributes, constraints]
+    preconditions: [rag corpus built (data/rag/kb.db)]
+    use_when:
+      - policy/procedure/howto questions answered from ingested documents
+    avoid_when:
+      - live system state (balances, statuses) — use structured_lookup
+    tool_schema_bundle: [rag.retrieve, rag.generate]
+    output_contract:
+      required_fields: [answer_markdown, citations]
+      optional_fields: [outcome, clarification, evidence_notes]
+    fallbacks: [structured_lookup, human_handoff]
+    confidence_signals: [grounding_coverage]
+    validation_rules: [grounding_coverage_min]
+    loading_mode: single_capability
+    cost_profile: low
+    latency_profile: medium
+    risk_profile: low
+
+  - name: structured_lookup
+    display_name: 文件元数据检索
+    owner: platform
+    domain_scope: records
+    capability_version: "0.1.0"
+    rollout_status: active
+    purpose: structured record lookup over file_manager metadata (FTS5 + LIKE fallback)
+    task_types_supported: ["*"]
+    required_inputs: [normalized_query]
+    optional_inputs: [constraints]
+    preconditions: [file_manager db exists (data/file_manager/file_manager.db)]
+    use_when:
+      - which/where/who-type questions over file records (filename, title, tags, project)
+      - rag evidence is insufficient or under-grounded (declared fallback target)
+    avoid_when:
+      - document content questions — that is rag_query's ground
+    tool_schema_bundle: [file_manager.search.metadata]
+    output_contract:
+      required_fields: [answer_markdown, records]
+      optional_fields: [result_count, match_mode]
+    fallbacks: [human_handoff]
+    confidence_signals: [record_count]
+    validation_rules: []
+    loading_mode: single_capability
+    cost_profile: low
+    latency_profile: low
+    risk_profile: low
+
+  - name: human_handoff
+    display_name: 转人工
+    owner: platform
+    domain_scope: global
+    capability_version: "0.1.0"
+    rollout_status: active
+    purpose: escalation family - persist a handoff packet + markdown export
+    task_types_supported: [human_handoff]
+    required_inputs: []
+    optional_inputs: []
+    preconditions: []
+    use_when:
+      - budget exhausted, unresolvable ambiguity, or policy stop
+    avoid_when:
+      - anything the loop can still decide on
+    tool_schema_bundle: []
+    output_contract:
+      required_fields: [handoff_id]
+      optional_fields: []
+    fallbacks: []
+    loading_mode: single_capability
+    cost_profile: low
+    latency_profile: low
+    risk_profile: low

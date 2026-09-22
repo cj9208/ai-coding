@@ -53,6 +53,7 @@ ocr-backend = "ocr_backend.cli:main"
 ocr-review = "ocr_review.cli:main"
 rag = "rag.cli:main"
 skills = "skill_manager.cli:main"
+orchestrate = "orchestrator.cli:main"
 
 [dependency-groups]
 dev = [
@@ -71,7 +72,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/coding", "src/modules", "src/pdf_summarizer", "src/utils", "src/ai_market_radar", "src/file_manager", "src/llm_client", "src/ocr_backend", "src/ocr_review", "src/task_queue", "src/research_agent", "src/storage", "src/rag", "src/skill_manager"]
+packages = ["src/coding", "src/modules", "src/pdf_summarizer", "src/utils", "src/ai_market_radar", "src/file_manager", "src/llm_client", "src/ocr_backend", "src/ocr_review", "src/task_queue", "src/research_agent", "src/storage", "src/rag", "src/skill_manager", "src/orchestrator"]
 
 [tool.uv]
 package = true
@@ -109,6 +110,7 @@ module = [
     "markdownify.*",
     "feedparser.*",
     "ruamel.*",
+    "yaml",
 ]
 ignore_missing_imports = true
 
