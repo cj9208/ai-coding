@@ -346,3 +346,26 @@ class TestQuotaGate:
         b = RequestEnvelope.new(text="q", budget=budget)
         a.execution_budget.wall_clock_paused_ms = 500
         assert b.execution_budget.wall_clock_paused_ms == 0
+
+
+class TestConfigArtifactIdentity:
+    """05d step 3: a request records *which* config processed it, so
+    replay can tell a silent-drift world from the recorded one."""
+
+    def test_create_path_stamps_the_registry_hash(self, store: Store) -> None:
+        reg = make_registry()
+        reg.config_hash = "abcd1234ef567890"
+        orch = Orchestrator(store, reg, FakeFrontHalf([STRONG]))
+        result = orch.run_turn("q")
+        env = store.get_request(result.request_id)
+        assert env is not None
+        assert env.config_hash == "abcd1234ef567890"
+
+    def test_a_registry_with_no_artifact_records_none(self, store: Store) -> None:
+        """Code fixtures (static registry, goldens) have no artifact to
+        name — honest absence, not a fabricated hash."""
+        orch = Orchestrator(store, make_registry(), FakeFrontHalf([STRONG]))
+        result = orch.run_turn("q")
+        env = store.get_request(result.request_id)
+        assert env is not None
+        assert env.config_hash is None

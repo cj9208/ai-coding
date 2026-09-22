@@ -79,13 +79,16 @@ ask it questions; the contract first if you intend to *change* behavior;
   `ORCHESTRATOR_FAST_PATH=1` (default off, parity-tested: same input,
   identical fired row-ids, zero model calls). The answer cache stays
   parked per the model until traffic prices its hit rate. **05d steps
-  1–2 landed too**: the erasure question is *decided* (contract record
+  1–3 landed too**: the erasure question is *decided* (contract record
   G-1 — crypto-erase, effective at the first EU/PIPL tenant) and the
   handoff black hole has an owner-side half (record G-2 —
   `handoff_tickets` + `worklist/claim/resolve`, packets provably
   unmutated, state machine untouched; the `handoff → routing` recovery
-  edge stays the owed DP-3 conversation). 05b's identity/idempotency,
-  05d's registry governance and config-as-release await their triggers.
+  edge stays the owed DP-3 conversation), and requests now name their
+  config (record G-3 — `envelope.config_hash`, replay reports drift,
+  the golden suite is the written release gate). 05b's
+  identity/idempotency, 05d's registry governance and the per-region
+  release process await their triggers.
   04 carries a **problem status ledger** — read it first for
   per-problem state.
 

@@ -374,6 +374,29 @@ Semantics fixed by this record:
   the same 05b step — the table carries `request_id`, so the join to a
   future tenant column is already there.
 
+### Record G-3: config-as-release — drift closure now, process later (05d step 3, 2026-09-22)
+
+**Question:** the 05d trigger parks config-as-release "with the rung-A
+service host" (per-region, versioned artifacts). But the hole the
+trigger guards — replaying a request recorded under one config against
+a silently-edited later one — exists on a single machine today:
+`capabilities.yaml` was already edited after requests had been
+persisted against it.
+
+**Decision: split the trigger.** `envelope.config_hash` — the
+sha256[:16] of the artifact bytes, stamped at the runtime's single
+request-create path from `registry.config_hash`, displayed by `replay`
+as match/DRIFT/unrecorded — ships now: one field, one write site, no
+host dependency. The *release process* (per-region versioned artifacts)
+stays gated on the host. The golden suite is named the release gate in
+`03-usage.md` ("Config release checklist"): a config change that breaks
+a golden is a behavior change and rides code's review rigor.
+
+Posture fixed here: byte-sensitivity over semantic equivalence (any
+edit moves the hash; display reports, never interprets), and honest
+absence — code fixtures and pre-05d rows carry `None`, never a
+backfilled hash.
+
 ## Control Loop
 
 Every return to `routing` runs CH02_02's four steps, in code:
@@ -480,13 +503,14 @@ orchestrate ask "春晖省钱卡怎么用"            # one turn; prints answer 
 orchestrate ask --resume req_01J... "第二个"  # clarification turn, budget survives (DP-8)
 orchestrate status [req_id]                   # request list / one-request timeline
 orchestrate replay req_id                     # decision path reconstructed from store
+                                              # + config: recorded hash vs current artifact (G-3)
 orchestrate handoff list
 orchestrate handoff export <handoff_id> --out packet.md
 orchestrate handoff worklist [--all]           # open/claimed/resolved (G-2)
 orchestrate handoff claim <handoff_id> --assignee ops [--reassign]
 orchestrate handoff resolve <handoff_id> --assignee ops --note "..."
 orchestrate golden run [--class routing|permission|...]
-orchestrate registry check                    # validate capabilities.yaml against the entry schema
+orchestrate registry check                    # validate capabilities.yaml; prints its config_hash (G-3)
 ```
 
 `orchestrate ask` is the only LLM-hitting command; `golden run` uses fakes

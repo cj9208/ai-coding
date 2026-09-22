@@ -48,6 +48,9 @@ def test_replay_prints_decision_path(tmp_path: Path, capsys) -> None:
     assert main(["--db", str(db), "replay", rid]) == 0
     out = capsys.readouterr().out
     assert "routing" in out and "execution" in out and "outcome" in out
+    # 05d step 3: replay names the config the request was processed under
+    # (the seeded request used the static fixture -> honest "unrecorded")
+    assert "config: unrecorded" in out and "(now:" in out
 
 
 def test_handoff_empty_then_export(tmp_path: Path) -> None:

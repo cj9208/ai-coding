@@ -14,6 +14,7 @@ carried on the entry for ownership/attribution, never consulted for routing.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,10 +31,21 @@ HUMAN_HANDOFF = "human_handoff"
 CAPABILITIES_PATH = REPO_ROOT / "config" / "orchestrator" / "capabilities.yaml"
 
 
+def config_hash_of(path: Path) -> str:
+    """Identity of a config artifact: a byte change (any semantic edit,
+    and even a comment edit) moves the hash. 16 hex chars identify an
+    artifact beyond birthday collision in any realistic release count."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
 @dataclass
 class Registry:
     entries: dict[str, CapabilityCatalogEntry] = field(default_factory=dict)
     impls: dict[str, "Capability"] = field(default_factory=dict)
+    #: sha256[:16] of the artifact this view was loaded from; ``None`` for
+    #: code fixtures (load_static) — no artifact exists to name
+    #: (docs/orchestrator/05d-lifecycle-governance.md §4)
+    config_hash: str | None = None
 
     def entry(self, name: str) -> CapabilityCatalogEntry:
         try:
@@ -145,4 +157,6 @@ def load_default() -> Registry:
         from .capabilities.lookup import StructuredLookupCapability
 
         impls["structured_lookup"] = StructuredLookupCapability()
-    return Registry(entries=entries, impls=impls)
+    return Registry(
+        entries=entries, impls=impls, config_hash=config_hash_of(CAPABILITIES_PATH)
+    )

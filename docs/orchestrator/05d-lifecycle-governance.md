@@ -4,11 +4,12 @@ Status: **executing 2026-09-22** — step 1 landed: the erasure decision
 is recorded in the contract ("Governance Records", record G-1:
 crypto-erase, effective at the first EU/PIPL tenant with legal
 sign-off); step 2 landed: the handoff worklist (`handoff_tickets` +
-`worklist|claim|resolve`, contract record G-2). Derived from
-`04-scaling.md`; one of four sub-plans (05a–05d). Suggested execution
-order: **4th** — most of its items are decisions to be made on
-schedule, not code to be written early; the capability-health signal
-joined late (04 ledger, §6c).
+`worklist|claim|resolve`, contract record G-2); step 3 landed:
+`envelope.config_hash` + replay display + the release checklist in
+`03-usage.md`. Derived from `04-scaling.md`; one of four sub-plans
+(05a–05d). Suggested execution order: **4th** — most of its items are
+decisions to be made on schedule, not code to be written early; the
+capability-health signal joined late (04 ledger, §6c).
 
 **One sentence:** decide the three governance questions the code cannot
 answer by itself (erasure, registry fields, config-as-release) and
@@ -40,7 +41,10 @@ where mistakes become irreversible faster.
 - Handoff worklist: when handoffs/day > ~10 sustained, or at the
   service host — whichever comes first.
 - Registry governance: when catalog entries pass ~20 (today: 2 — far).
-- Config-as-release: with the rung-A service host.
+- Config-as-release: **split at landing (2026-09-22)** — the
+  `config_hash` drift closure shipped because the hole exists today
+  (§4 notes); per-region release *process* machinery still waits for
+  the rung-A service host.
 
 ## Design sketch
 
@@ -146,6 +150,32 @@ operator edits under a running service. Two concrete pieces land here:
   replayed against a v5 world. One field, one write site (the request
   create path), replay display only.
 
+**Landed 2026-09-22 (step 3; the trigger said "with the rung-A
+service host" — why we split it):**
+
+- The trigger governs the *release process* (per-region versioned
+  artifacts); the drift hole it protects against exists on this
+  machine today — replay a request recorded before the M2 yaml edits
+  and nothing tells you the registry changed. `config_hash` is a
+  one-field/one-write-site closure with no host dependency, so it
+  shipped now; the per-region artifact machinery stays gated.
+- Shape as sketched: `Registry.config_hash` (sha256[:16] of the
+  artifact bytes, set only by `load_default` — code fixtures honestly
+  record `None`), threaded through `RequestEnvelope.new` at the
+  runtime's single create path. Byte-sensitivity is a feature: even a
+  comment edit moves the hash, and display *reports* drift rather
+  than interpreting it.
+- Display: `replay` prints a `config:` line comparing recorded vs the
+  current artifact bytes (match / DRIFT / unrecorded), `status
+  <request_id>` carries it in the envelope JSON, `registry check`
+  names the artifact it validated. Replay reads the bytes directly —
+  it must not pull in capability implementations or fail on a broken
+  yaml during a read-only command.
+- Pre-05d rows load as `config_hash=None` (pydantic default) —
+  displayed as "unrecorded", not backfilled with a fabricated hash.
+- The release-gate process commitment is written into `03-usage.md`
+  ("Config release checklist"); the golden suite is the gate.
+
 ### 5. Capability health signal (adopted from the 04 ledger, §6c)
 
 A dead downstream has no trip state today: every request rediscovers
@@ -171,14 +201,20 @@ hammer a dead peer.
 2. ✅ `handoff_tickets` + `claim|resolve|worklist` CLI + immutability
    tests (2026-09-22, record G-2; the packet-unchanged assertion is a
    pytest, not a golden — see §2 notes).
-3. `envelope.config_hash` + replay display + release-checklist section
-   in `03-usage.md`.
+3. ✅ `envelope.config_hash` + replay display + release-checklist
+   section in `03-usage.md` (2026-09-22; the per-region artifact
+   machinery of the same trigger stays gated on the service host —
+   see §4 notes).
 4. Registry-governance decision record (drafted when entries > ~20;
-   the two options above are the menu).
+   the two options above are the menu). **Gated as checked 2026-09-22:
+   catalog holds 3 entries (rag_query, structured_lookup,
+   human_handoff) — the trigger is not close; nothing executable.**
 5. Health signal: trip window + routing/validation rows consuming
    `health` (a DP-5 row addition — contract note in the design doc
    first, same rigor as any table change); lands with the service
-   host, never before.
+   host, never before. **Gated by design ("never before") — no host
+   exists; landing the trip window now would mean an unobservable bit
+   with nothing standing long enough to trip it.**
 
 ## Verification
 
@@ -188,6 +224,11 @@ hammer a dead peer.
 - ✅ Suite green; no state-machine transition changes (asserted: the
   worklist diff touches `store.py`/`cli.py` only; `LEGAL_TRANSITIONS`
   in `runtime.py` is untouched).
+- ✅ `config_hash`: artifact bytes are named by `load_default`, move
+  on any byte edit, and are `None` for code fixtures; the create path
+  stamps the envelope and fixtures record honest absence; `replay` and
+  `registry check` display the hash (tests in `test_registry_yaml.py`,
+  `test_runtime.py`, `test_cli.py`).
 
 ## Non-goals
 

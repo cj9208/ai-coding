@@ -70,7 +70,7 @@ only prose here.
 | A.1 Chinese-only safety gate | **fixed** — per-locale packs (zh verbatim + en first tranche); missing pack now clarifies via `s_unsupported_locale` instead of silently allowing | 05b step 1 (2026-09-22); en content review continues |
 | A.2 registry governance | **open** — trigger (≈20 entries) not reached; first DP-5 renegotiation pressure | 05d |
 | A.3 erasure law vs append-only | **decided, unbuilt** — contract record G-1 (2026-09-22): crypto-erase (per-user data keys, zero row edits, DP-7 audit untouched), effective at the first EU/PIPL tenant with legal sign-off; implementation stays gated on that date | 05d step 1 (decision) done; code awaits the trigger |
-| A.4 config-as-release | **open** | 05d |
+| A.4 config-as-release | **half landed** — `envelope.config_hash` + replay drift display close the silent-drift hole today (release checklist written into 03-usage); per-region versioned artifact *process* still gated on the service host | 05d step 3 (2026-09-22) + host |
 | A.5 batching → Postgres, in that order | **batching done; Postgres closed as "won't trigger"** for pilot-A throughput, with named reopen conditions | 05a steps 3–4 (verdict) |
 | A.6 handoff = headcount | **half fixed** — packets now have owners and a resolution trail (G-2 worklist); staffing signals (open-ticket depth per assignee/tenant) need the host's metrics surface and 05b identity | 05d step 2 (2026-09-22) + host |
 | B.1 adversarial input | **hardened (harness side)** — adversarial test class landed; two real holes found + fixed (ungated resume answer, model-revocable gate constraint); regex-gate ceilings recorded, gateway contract written | 05b steps 4–5 (2026-09-22); authN/rate-limit enforcement awaits a deployment |
@@ -460,7 +460,10 @@ ordered:
    `rollout_status`/`cost_profile`/`latency_profile`, or they die —
    a contract (DP-5) conversation, tracked like DP-3's handoff question;
 7. (A+B) **config-as-release**: capabilities/thresholds/alias packs
-   versioned, gated by the golden suite, shipped per region.
+   versioned, gated by the golden suite, shipped per region —
+   ✅ drift closure shipped early (`envelope.config_hash`, replay
+   display, release checklist in 03-usage; 05d step 3); per-region
+   shipping awaits the host.
 
 Still *not* on the list at any rung: changing the seven runtime objects,
 the tables' first-match-row-id semantics, or DP-8. They are the parts

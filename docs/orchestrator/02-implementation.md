@@ -12,16 +12,17 @@ contract's per-milestone Implementation Notes are the official record of
 
 ```text
  THE CONTRACTS (one module defines what all others exchange)
- contracts.py    629   seven runtime objects + signal/value objects,
+ contracts.py    635   seven runtime objects + signal/value objects,
                        all enums; _Contract = strict pydantic base
  protocol.py      40   Capability + FrontHalf Protocols (structural, not ABC)
 
  THE HARNESS
- runtime.py      864   Orchestrator: state machine + control loop,
+ runtime.py      865   Orchestrator: state machine + control loop,
                        sole writer of current_status (_transition)
  policy.py       286   3 decision tables + fallback rows, as Row data
  assess.py       180   envelope+output -> signal objects; caps; wall clock
- registry.py     148   Registry + load_yaml / load_default / load_static
+ registry.py     162   Registry + load_yaml / load_default / load_static;
+                       config_hash_of names the artifact (05d)
  store.py        503   4-table SQLite persistence (via src/storage) —
                        the 4th is the 05d handoff worklist (tickets
                        consume packets; open = no row; never a mutation)
@@ -51,7 +52,7 @@ contract's per-milestone Implementation Notes are the official record of
 
  THE REGRESSION SURFACE
  golden.py       215   case loader + scripted replay + decision diff
- cli.py          306   orchestrate: ask/status/replay/handoff
+ cli.py          321   orchestrate: ask/status/replay/handoff
                        (list|export|worklist|claim|resolve)/golden/registry
 ```
 
@@ -175,6 +176,11 @@ code path here writes `runtime_objects`, and no ticket row means open).
 The envelope is
 reloaded, never patched in place across processes; `update_request` writes
 the whole blob at each transition — small rows, total consistency.
+`envelope.config_hash` (05d) is set once, at the runtime's single
+request-create path, from `registry.config_hash` — the sha256[:16] of
+the `capabilities.yaml` bytes that produced the recorded decisions;
+code fixtures and pre-05d rows carry `None`, which `replay` reports as
+"unrecorded" instead of backfilling.
 
 ## Tests and golden cases
 

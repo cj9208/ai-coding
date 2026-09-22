@@ -201,6 +201,10 @@ class RequestEnvelope(_Contract):
     execution_budget: ExecutionBudget = Field(default_factory=ExecutionBudget)
     attempt_counters: AttemptCounters = Field(default_factory=AttemptCounters)
     state: StateRefs = Field(default_factory=StateRefs)
+    #: identity of the config artifact that processed this request
+    #: (``registry.config_hash``); ``None`` for rows written before 05d
+    #: step 3 or by code fixtures with no artifact
+    config_hash: str | None = None
 
     @staticmethod
     def new(
@@ -211,6 +215,7 @@ class RequestEnvelope(_Contract):
         locale: str = "zh",
         policy_context: PolicyContext | None = None,
         budget: ExecutionBudget | None = None,
+        config_hash: str | None = None,
     ) -> "RequestEnvelope":
         import time
 
@@ -225,6 +230,7 @@ class RequestEnvelope(_Contract):
             # so a caller-reused template must never be aliased by two live
             # envelopes (DP-8: per-request state is per-request)
             execution_budget=budget.model_copy() if budget else ExecutionBudget(),
+            config_hash=config_hash,
         )
 
 

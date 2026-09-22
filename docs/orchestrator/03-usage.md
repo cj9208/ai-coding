@@ -74,7 +74,12 @@ on a front-half exception.
 The decision-path reconstruction — the reason every table row fires with
 an id. Prints, in order:
 
-1. header: status, original input, attempt counters;
+1. header: status, original input, attempt counters, and the **config
+   line** (05d): `config: <recorded hash>` compared against the current
+   `capabilities.yaml` bytes — `(matches current artifact)` or
+   `(DRIFT: current artifact is ...)`; requests written before 05d say
+   `unrecorded`. Replay only hashes the file — a read-only command must
+   not import capability implementations or die on a half-written yaml;
 2. one line per **runtime object** (`[seq] kind: payload`), append-only
    in decision order — you can watch `interpretation → routing →
    execution → execution(fallback) → outcome`;
@@ -155,7 +160,31 @@ would hide a half-written config; `load_default` refuses to paper over
 one) — then binds implementations and prints each entry with its
 `task_types` and binding status. Exit 1 prints the schema error instead
 of a traceback. This is the command to run after *any* YAML edit; it
-loads no corpus, no file_manager web stack.
+loads no corpus, no file_manager web stack. The last line names the
+artifact: `config_hash=<sha>` — the same value new envelopes record.
+
+## Config release checklist (05d)
+
+Config is behavior: `capabilities.yaml`, thresholds, alias packs, and
+budgets change what the harness decides without changing a line of
+code. The commitment (from `05d-lifecycle-governance.md` §4):
+
+1. edit the config;
+2. `orchestrate registry check` — schema-valid, and note the reported
+   `config_hash`;
+3. `orchestrate golden run` — **the golden suite is the release gate**.
+   A config change that breaks a golden is a behavior change; either
+   the behavior is intended (commit a golden update with the config
+   change, same review rigor as code) or it is a regression;
+4. `uv run pytest tests/test_orchestrator` for the parts goldens
+   cannot see (worklist, quota math, execution paths).
+
+Existing requests replay honestly across a release: `replay` compares
+each request's recorded `config_hash` against the current artifact and
+flags `DRIFT` — the decision path was real, but under the *previous*
+config. Per-region, versioned config artifacts (the multi-region
+release process) are gated on the rung-A service host; until then
+there is exactly one artifact per deployment and the hash names it.
 
 ## Library entry points
 
@@ -164,7 +193,7 @@ loads no corpus, no file_manager web stack.
 | `orchestrator.runtime.Orchestrator(store, registry, front_half)` | `run_turn(text, user_id=..., locale=...)` / `resume(request_id, answer)` → `TurnResult(status, response, question, request_id)`; async twins `run_turn_async` / `resume_async` for embedding in a running event loop (05a step 5 — the sync entries fail fast inside a loop). Pass any `FrontHalf` — `LlmFrontHalf` for prod, `interpret.FakeFrontHalf` for tests |
 | `orchestrator.registry.load_default()` | production view: YAML + bound impls (rag_query, structured_lookup) |
 | `orchestrator.registry.load_static()` | code fixture for tests/golden — regression never needs a built corpus |
-| `orchestrator.store.Store(db_path)` | three-table persistence; `get_request` / `objects` / `events` / `objects_of_kind` |
+| `orchestrator.store.Store(db_path)` | four-table persistence; `get_request` / `objects` / `events` / `objects_of_kind` / `get_ticket` / `claim_ticket` / `resolve_ticket` |
 | `orchestrator.config.Budget/Thresholds` | every tunable, in one namespace each (see `02-implementation.md` constants table) |
 
 ## Deployment contract: what sits in front of `run_turn` (05b step 5)

@@ -157,7 +157,10 @@ def _cmd_registry_check(store: Store, args: argparse.Namespace) -> int:
             f"{name:<16} v{entry.capability_version:<8} task_types="
             f"{entry.task_types_supported}  {impl}"
         )
-    print(f"{CAPABILITIES_PATH}: ok, {len(entries)} entries")
+    print(
+        f"{CAPABILITIES_PATH}: ok, {len(entries)} entries"
+        f"  config_hash={registry.config_hash}"
+    )
     return 0
 
 
@@ -190,6 +193,18 @@ def _cmd_replay(store: Store, args: argparse.Namespace) -> int:
         f"request {envelope.request_id}  status={envelope.state.current_status.value}"
         f"  input={envelope.original_input.text!r}"
     )
+    from .registry import CAPABILITIES_PATH, config_hash_of
+
+    recorded = envelope.config_hash
+    now = config_hash_of(CAPABILITIES_PATH) if CAPABILITIES_PATH.is_file() else None
+    config_line = f"config: {recorded or 'unrecorded (pre-05d row or static fixture)'}"
+    if recorded is None:
+        config_line += f"  (now: {now})"
+    elif recorded == now:
+        config_line += "  (matches current artifact)"
+    else:
+        config_line += f"  (DRIFT: current artifact is {now})"
+    print(config_line)
     counters = envelope.attempt_counters.model_dump()
     print(f"counters: {counters}\n")
     for obj in store.objects(args.request_id):

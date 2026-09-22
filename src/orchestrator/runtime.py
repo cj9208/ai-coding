@@ -194,6 +194,7 @@ class Orchestrator:
             session_id=session_id,
             locale=locale,
             budget=budget,
+            config_hash=self.registry.config_hash,
         )
         with self.store.transact():
             self.store.create_request(envelope)

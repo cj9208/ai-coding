@@ -36,6 +36,27 @@ def test_load_default_binds_both_adapters() -> None:
     assert not reg.has_impl(HUMAN_HANDOFF)
 
 
+# -- config artifact identity (05d step 3) ------------------------------------
+def test_load_default_names_its_artifact(tmp_path: Path) -> None:
+    from orchestrator.registry import config_hash_of
+
+    reg = load_default()
+    assert reg.config_hash == config_hash_of(CAPABILITIES_PATH)
+    # a byte-identical copy is the same artifact...
+    twin = tmp_path / "twin.yaml"
+    twin.write_bytes(CAPABILITIES_PATH.read_bytes())
+    assert config_hash_of(twin) == reg.config_hash
+    # ...and *any* byte change moves the hash, comment edits included —
+    # drift is reported, not interpreted
+    with twin.open("ab") as fh:
+        fh.write(b"\n# a single comment\n")
+    assert config_hash_of(twin) != reg.config_hash
+
+
+def test_static_fixture_has_no_artifact_to_name() -> None:
+    assert load_static().config_hash is None
+
+
 def test_missing_required_field_is_named(tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text(
@@ -60,5 +81,7 @@ def test_static_fixture_view_is_unchanged() -> None:
     assert reg.select("faq_howto") == "echo"  # golden/tests keep the fake world
 
 
-def test_registry_check_cli(tmp_path: Path) -> None:
+def test_registry_check_cli(tmp_path: Path, capsys) -> None:
     assert main(["--db", str(tmp_path / "r.db"), "registry", "check"]) == 0
+    # 05d step 3: the operator-facing line names the artifact
+    assert "config_hash=" in capsys.readouterr().out
