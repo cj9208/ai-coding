@@ -1,0 +1,60 @@
+{
+  "code_hash": "2f04b2e50658f0af",
+  "git_rev": "d7024b4",
+  "metrics": {
+    "10.0": {
+      "cagr": -0.14442269449235412,
+      "cost_drag_pa": 0.03748821178821179,
+      "days": 1323,
+      "from": "2022-01-17",
+      "max_drawdown": -0.7113502260216827,
+      "sharpe": -0.330680022012173,
+      "to": "2025-08-31",
+      "turnover_pa": 37.488211788211785
+    },
+    "20.0": {
+      "cagr": -0.17601934291415955,
+      "cost_drag_pa": 0.07497642357642358,
+      "days": 1323,
+      "from": "2022-01-17",
+      "max_drawdown": -0.7540752438820449,
+      "sharpe": -0.4485028529679128,
+      "to": "2025-08-31",
+      "turnover_pa": 37.488211788211785
+    }
+  },
+  "passed_stressed": false,
+  "run_id": "funding-2022-01-01_2026-06-30-83cf629250",
+  "sealed_from": "2025-08-31",
+  "spec": {
+    "dataset": "um_klines_1d",
+    "end": "2026-06-30",
+    "factor": "funding",
+    "note": "m1 pre-reg: funding defaults, 20-major universe 2026-09-22",
+    "params": {},
+    "rebalance_every": 5,
+    "start": "2022-01-01",
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "ZECUSDT",
+      "XRPUSDT",
+      "DOGEUSDT",
+      "1000PEPEUSDT",
+      "NEARUSDT",
+      "SUIUSDT",
+      "HYPEUSDT",
+      "BNBUSDT",
+      "UNIUSDT",
+      "TAOUSDT",
+      "ENAUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "WLDUSDT",
+      "ARBUSDT",
+      "LINKUSDT",
+      "LTCUSDT"
+    ]
+  }
+}

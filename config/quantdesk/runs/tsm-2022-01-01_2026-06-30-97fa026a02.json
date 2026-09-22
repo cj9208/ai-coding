@@ -1,0 +1,60 @@
+{
+  "code_hash": "2f04b2e50658f0af",
+  "git_rev": "d7024b4",
+  "metrics": {
+    "10.0": {
+      "cagr": -0.0035822393277364917,
+      "cost_drag_pa": 0.01425218271536898,
+      "days": 1338,
+      "from": "2022-01-02",
+      "max_drawdown": -0.5908339485070822,
+      "sharpe": 0.21111233904414353,
+      "to": "2025-08-31",
+      "turnover_pa": 14.252182715368978
+    },
+    "20.0": {
+      "cagr": -0.01770896791351728,
+      "cost_drag_pa": 0.02850436543073796,
+      "days": 1338,
+      "from": "2022-01-02",
+      "max_drawdown": -0.6011348988193308,
+      "sharpe": 0.1785144624785418,
+      "to": "2025-08-31",
+      "turnover_pa": 14.252182715368978
+    }
+  },
+  "passed_stressed": false,
+  "run_id": "tsm-2022-01-01_2026-06-30-97fa026a02",
+  "sealed_from": "2025-08-31",
+  "spec": {
+    "dataset": "um_klines_1d",
+    "end": "2026-06-30",
+    "factor": "tsm",
+    "note": "m1 pre-reg: tsm defaults, 20-major universe 2026-09-22",
+    "params": {},
+    "rebalance_every": 5,
+    "start": "2022-01-01",
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "ZECUSDT",
+      "XRPUSDT",
+      "DOGEUSDT",
+      "1000PEPEUSDT",
+      "NEARUSDT",
+      "SUIUSDT",
+      "HYPEUSDT",
+      "BNBUSDT",
+      "UNIUSDT",
+      "TAOUSDT",
+      "ENAUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "WLDUSDT",
+      "ARBUSDT",
+      "LINKUSDT",
+      "LTCUSDT"
+    ]
+  }
+}

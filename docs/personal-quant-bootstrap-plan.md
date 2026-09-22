@@ -5,9 +5,12 @@ day** (`src/quantdesk/`, `quant` CLI — archive download/verify, hive convert,
 universe snapshots, BTCUSDT um 1m + funding round-trip clean), **recorder
 (`quant record`) shipped**: funding and OI recorded live, liquidations feed
 implemented and silence-watched but its positive path awaits a network where
-`fstream.binance.com` pushes (TODO.md), **M1 factor layer shipped** (three
-as-of factors + screening harness + trial ledger; the runs await the
-crypto-native top-20 backfill — owner scope call, see M0 acceptance). Per
+`fstream.binance.com` pushes (TODO.md), **M1 shipped and run 2026-09-22**
+(three as-of factors + screening harness + trial ledger; the three
+pre-registered runs on the crypto-native top-20 universe — owner scope
+call, see M0 acceptance — all failed the stressed-cost gate, Sharpe
+0.36 / 0.18 / −0.45 vs the 0.5 bar, holdout sealed and unread; the
+byte-identical re-run acceptance held). Per
 decision D-2 the living documentation moved to
 the numbered set `docs/quantdesk/` (start at `00-overview.md`) — this
 document stays the *scope and gates* authority. Companion to

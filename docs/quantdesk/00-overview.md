@@ -59,13 +59,18 @@ trusting the plan alone will not be surprised.
 - **M1 code shipped**: three pure as-of factors (CSM "avoid losers", TSM
   + vol targeting, extreme funding reversal), the screening harness with
   baseline/stressed costs, the structural 12-month holdout clamp,
-  manifests + trial ledger in `config/quantdesk/`. 26 tests green.
-- **M1 runs pending data**: the backfill is downloading — **20
-  crypto-native majors** (first 20 of today's USD-M quote-volume ranking
-  with tokenized stock/commodity perps skipped — the owner's call:
-  large caps only, no short-history bets), daily bars + funding from
-  2021-01. The three screening runs and their acceptance
-  (byte-identical re-run) land after it completes.
+  manifests + trial ledger in `config/quantdesk/`. 28 tests green.
+- **M1 runs landed 2026-09-22 — all three fail the stressed gate.**
+  Universe: **20 crypto-native majors** (first 20 of today's USD-M
+  quote-volume ranking with tokenized stock/commodity perps skipped —
+  the owner's call: large caps only, no short-history bets), daily
+  bars + funding 2022-01-01..2026-06-30, holdout sealed before
+  2025-08-31 and never read. Stressed Sharpe: csm (hold 5) 0.36,
+  tsm 0.18, funding reversal −0.45 — none clears 0.5. The acceptance
+  property held: the re-run rewrote a byte-identical manifest and the
+  ledger records every run. This is M1 doing its job — cheap, honest
+  negatives before any capital thinking; next move belongs to M2's
+  protocol, not to parameter archaeology on these three.
 - **M2 (validation protocol) and M3 (own event kernel)**: not started;
   their gates are fixed in the plan and unchanged by anything here.
 

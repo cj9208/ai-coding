@@ -301,7 +301,9 @@ def record_run(result: ScreenResult, ledger_path: Path | None = None) -> Path:
     payload = manifest_payload(result)
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     manifest = RUNS_DIR / f"{result.spec.run_id}.json"
-    manifest.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    manifest.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     header = [
         "run_at",
         "run_id",
