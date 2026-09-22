@@ -7,7 +7,8 @@ universe snapshots, BTCUSDT um 1m + funding round-trip clean), **recorder
 implemented and silence-watched but its positive path awaits a network where
 `fstream.binance.com` pushes (TODO.md), **M1 factor layer shipped** (three
 as-of factors + screening harness + trial ledger; the runs await the
-top-100 daily backfill). Per decision D-2 the living documentation moved to
+crypto-native top-20 backfill — owner scope call, see M0 acceptance). Per
+decision D-2 the living documentation moved to
 the numbered set `docs/quantdesk/` (start at `00-overview.md`) — this
 document stays the *scope and gates* authority. Companion to
 `personal-quant-trading-exploration.md`, which owns the *why* (capital
@@ -119,7 +120,10 @@ CLI `quant download / verify / list / record` as the one entry point
   streams → same Parquet conventions. Zero marginal cost, it is the
   only asset in this plan nobody else can't download — its value
   increases with uptime.
-- Acceptance: one command rebuilds top-100 × 4 years; truncating a file
+- Acceptance: one command rebuilds a sizeable universe × 4 years
+  (amended 2026-09-22, owner scope call: top-100 → crypto-native
+  top-20 — the ranking's stock/commodity perps have histories too short
+  for any factor and are not what we would trade); truncating a file
   gets caught by `verify`; golden fixture (small month, byte-identical
   rebuild) in `tests/golden/`.
 

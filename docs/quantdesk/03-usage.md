@@ -121,29 +121,36 @@ uv run quant list
 uv run quant verify --remote
 ```
 
-**Top-100 daily backfill (M1 data, 2026-09-22):**
+**Crypto-native top-20 backfill (M1 data, 2026-09-22):**
 
 ```bash
 uv run quant universe rank --market um --top 100 > /tmp/um_top100.csv   # stdout is one csv line
-SYMS=$(cat /tmp/um_top100.csv) && FUND=$(echo "$SYMS" | cut -d, -f1-20)
-uv run quant download --datasets um_klines_1d   --symbols "$SYMS" --since 2021-01
-uv run quant download --datasets um_funding_rate --symbols "$FUND" --since 2021-01
-uv run quant convert  --datasets um_klines_1d   --symbols "$SYMS" --since 2021-01
-uv run quant convert  --datasets um_funding_rate --symbols "$FUND" --since 2021-01
+# freeze the universe: first 20 CRYPTO-NATIVE names in ranking order,
+# skipping tokenized stock/commodity perps (XAU/XAG/CL/SOXL/SNDK/SPCX/
+# SKHYNIX/MSTR/MU/INTC/KORU/CRCL/…, mostly listed 2025-26) — the owner's
+# scope call: large caps only. Result (2026-09-22 ranking):
+#   BTC ETH SOL ZEC XRP DOGE 1000PEPE NEAR SUI HYPE
+#   BNB UNI TAO ENA ADA AVAX WLD ARB LINK LTC
+SYMS=$(cat /tmp/um_top20_majors.csv)
+uv run quant download --datasets um_klines_1d,um_funding_rate --symbols "$SYMS" --since 2021-01
+uv run quant convert  --datasets um_klines_1d,um_funding_rate --symbols "$SYMS" --since 2021-01
 ```
 
-(The rank file is a *frozen* universe — download/convert may run for
-hours; ~7k planned files, `missing` months for recent listings are
-normal. Pilot throughput ≈ 0.9 s/file.)
+(The rank file is a *frozen* universe — the selection rule and its day
+belong in the screening `--note`; ~2.7k planned files, `missing` months
+for late listings are normal and cost one 404 each since ceb595e.
+Observed throughput ≈ 1.4 s/file for old names.)
 
 **Screening the three pre-registered hypotheses (M1 acceptance):**
 
 ```bash
-SYMS=$(cat /tmp/um_top100.csv)
-uv run quant screen --factor csm --symbols "$SYMS" --since 2022-01-01 --until 2026-06-30 --note "m1 pre-reg: csm defaults"
-uv run quant screen --factor tsm --symbols "$SYMS" --since 2022-01-01 --until 2026-06-30 --note "m1 pre-reg: tsm defaults"
-uv run quant screen --factor funding --symbols "$(echo "$SYMS" | cut -d, -f1-20)" \
-                    --since 2022-01-01 --until 2026-06-30 --note "m1 pre-reg: funding defaults"
+SYMS=$(cat /tmp/um_top20_majors.csv)
+uv run quant screen --factor csm --symbols "$SYMS" --since 2022-01-01 --until 2026-06-30 \
+                    --set hold=5 --note "m1 pre-reg: csm, 20-major universe 2026-09-22, hold=top quartile"
+uv run quant screen --factor tsm --symbols "$SYMS" --since 2022-01-01 --until 2026-06-30 \
+                    --note "m1 pre-reg: tsm defaults, 20-major universe 2026-09-22"
+uv run quant screen --factor funding --symbols "$SYMS" --since 2022-01-01 --until 2026-06-30 \
+                    --note "m1 pre-reg: funding defaults, 20-major universe 2026-09-22"
 ```
 
 **Reproducibility check** (the acceptance property): rerun one screen

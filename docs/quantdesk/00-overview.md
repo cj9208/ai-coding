@@ -60,8 +60,11 @@ trusting the plan alone will not be surprised.
   + vol targeting, extreme funding reversal), the screening harness with
   baseline/stressed costs, the structural 12-month holdout clamp,
   manifests + trial ledger in `config/quantdesk/`. 26 tests green.
-- **M1 runs pending data**: the top-100 × daily-bars backfill from
-  2021-01 is downloading; the three screening runs and their acceptance
+- **M1 runs pending data**: the backfill is downloading — **20
+  crypto-native majors** (first 20 of today's USD-M quote-volume ranking
+  with tokenized stock/commodity perps skipped — the owner's call:
+  large caps only, no short-history bets), daily bars + funding from
+  2021-01. The three screening runs and their acceptance
   (byte-identical re-run) land after it completes.
 - **M2 (validation protocol) and M3 (own event kernel)**: not started;
   their gates are fixed in the plan and unchanged by anything here.

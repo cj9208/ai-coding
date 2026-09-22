@@ -151,8 +151,12 @@ as well, so the decisions document and the code tell the same story).
 TRADING snapshot — ranking *history* by *today's* activity is
 survivorship bias wearing a leaderboard, and the code says so. What
 makes it usable is that each screening run embeds the frozen symbol
-list in its manifest: the claim is never "the top 100", only "the 100
-names ranked on 2026-09-22, recorded here". The plan's open question 2
+list in its manifest: the claim is never "the top N", only "the names
+ranked on 2026-09-22, selected by the written rule, recorded here". The
+selection rule itself is a today-judgment too (M1's universe skips
+today's tokenized stock/commodity perps — histories too short for any
+factor); what the manifest freezes is the *result*, so the judgment is
+auditable rather than silently updated. The plan's open question 2
 (delisted-pair depth) bounds what any of this can ever prove; the
 honest posture is to accumulate dated snapshots and say so, not to
 pretend the reconstruction is survivorship-free.
