@@ -5,7 +5,11 @@ day** (`src/quantdesk/`, `quant` CLI — archive download/verify, hive convert,
 universe snapshots, BTCUSDT um 1m + funding round-trip clean), **recorder
 (`quant record`) shipped**: funding and OI recorded live, liquidations feed
 implemented and silence-watched but its positive path awaits a network where
-`fstream.binance.com` pushes (TODO.md). Companion to
+`fstream.binance.com` pushes (TODO.md), **M1 factor layer shipped** (three
+as-of factors + screening harness + trial ledger; the runs await the
+top-100 daily backfill). Per decision D-2 the living documentation moved to
+the numbered set `docs/quantdesk/` (start at `00-overview.md`) — this
+document stays the *scope and gates* authority. Companion to
 `personal-quant-trading-exploration.md`, which owns the *why* (capital
 arithmetic, channel walls, cost layers). This document owns the *how*
 of one deliberately narrow slice: the **research pipeline only** —
@@ -130,7 +134,7 @@ CLI `quant download / verify / list / record` as the one entry point
   (taker ~10 bp/side) and stressed (2×). **A factor passes only at
   stressed costs.**
   *(Deviation recorded at implementation, 2026-09-22: screening is a
-  ~150-line polars harness in `quantdesk/screen.py` instead — at the
+  ~350-line polars harness in `quantdesk/screen.py` instead — at the
   daily grid the arithmetic must agree bar-for-bar with the M3 kernel
   later, so a second engine's cost semantics would be a thing to
   understand, not removed. vectorbt stays on the M3 comparison

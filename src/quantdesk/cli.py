@@ -6,7 +6,11 @@
                    --since 2024-01 --until 2024-12       # raw -> Parquet months
     quant list                                            # coverage table
     quant verify [--remote]                               # hash/grid/replacement
-    quant universe sync|show                              # dated symbol lists
+    quant universe sync|show|rank                         # dated symbol lists
+    quant record [--streams …] [--minutes N]              # unarchived feeds
+    quant screen --factor csm --rank 100 \
+               --since 2022-01-01 --until 2026-06-30      # factor screening,
+                                                           # holdout sealed
 
 download/convert are pure "make local match the requested range"
 commands — rerunning them is a no-op, matching the house posture that
