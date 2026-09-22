@@ -63,6 +63,29 @@ def test_prefix_wildcard_only_on_ascii_units():
     assert match_expr(["年报"], joiner=" OR ", prefix=True) == "(年 AND 报 AND 年报)"
 
 
+def test_punctuation_units_are_quoted_not_fatal():
+    # unquoted, "a.pdf" makes FTS5 raise `syntax error near "."` and the
+    # whole query dies; word-like (alnum) units — ASCII *and* CJK — stay bare
+    assert token_expr("a.pdf") == '("a.pdf")'
+    # the glued CJK run still folds into its own (bare) units beside it
+    assert (
+        token_expr("Cold_Email.pdf，我要")
+        == '("Cold_Email.pdf，" AND 我 AND 要 AND 我要)'
+    )
+
+
+def test_punctuated_token_matches_a_folded_doc(client: SqliteClient):
+    _insert(client, 9, "季度报告", "详见 activity_brief_cold_email.pdf 附件")
+    with client.session() as db:
+        # the query-side token is folded too, so the phrase's tokens must
+        # be adjacent in the write-side fold — which they are
+        assert INDEX.rowids_for(db, match_expr(["activity_brief_cold_email.pdf"])) == [
+            9
+        ]
+        # a CJK run glued to punctuation still resolves via the bigram fold
+        assert INDEX.rowids_for(db, match_expr(["详见"])) == [9]
+
+
 def test_cjk_bigram_hit_and_no_stray_char_hit(client: SqliteClient):
     _insert(client, 1, " quarterly 报告", "本季度营收增长")
     _insert(client, 2, "笔记", "只提到报和导两个散字")

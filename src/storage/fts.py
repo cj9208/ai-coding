@@ -37,6 +37,10 @@ def fold_cjk(text_value: str | None) -> str:
     return _CJK_RE.sub(lambda m: fold_run(m.group(0)), text_value or "")
 
 
+def _quote_phrase(unit: str) -> str:
+    return '"' + unit.replace('"', '""') + '"'
+
+
 def token_expr(token: str, *, prefix: bool = False) -> str:
     """One folded keyword as one parenthesised group.
 
@@ -46,12 +50,20 @@ def token_expr(token: str, *, prefix: bool = False) -> str:
 
     ``prefix=True`` appends FTS5's ``*`` wildcard to folded ASCII units
     (``repo*``) while CJK units stay exact — the graded behaviour proven in
-    file_manager's metadata search."""
-    units = [
-        t + "*" if prefix and t.isascii() and t.isalnum() else t
-        for t in fold_cjk(token).split()
-        if t
-    ]
+    file_manager's metadata search. A unit that is not word-like (punctuation
+    survives folding: ``a.pdf，``) becomes a quoted phrase — unquoted it
+    makes FTS5 raise ``syntax error near "."`` and the whole query dies,
+    which a caller cannot tell apart from "no results"."""
+    units: list[str] = []
+    for t in fold_cjk(token).split():
+        if not t:
+            continue
+        if not t.isalnum():
+            units.append(_quote_phrase(t))
+        elif prefix and t.isascii():
+            units.append(t + "*")
+        else:
+            units.append(t)
     return f"({' AND '.join(units)})" if units else ""
 
 
