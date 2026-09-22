@@ -26,6 +26,7 @@ dependencies = [
     "pydantic>=2.13.3",
     "polars>=1.44.2",
     "pyarrow>=23.0.1",
+    "websockets>=17.1",
 ]
 
 [project.optional-dependencies]

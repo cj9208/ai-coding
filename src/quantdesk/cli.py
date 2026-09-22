@@ -16,12 +16,13 @@ provisioning is an idempotent CLI subcommand, not a shell script.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 from datetime import date, timedelta
 
 from . import archive
 from . import convert as convert_mod
-from . import store, universe
+from . import record, store, universe
 from .config import DATASETS, parse_csv_list
 
 
@@ -115,6 +116,36 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 1 if issues else 0
 
 
+def cmd_record(args: argparse.Namespace) -> int:
+    streams = record.parse_streams(args.streams)
+    if args.symbols:
+        symbols = parse_csv_list(args.symbols)
+    elif args.top:
+        snap = universe.latest("um")
+        if snap is None:
+            raise SystemExit("no universe snapshot — run `quant universe sync`")
+        symbols = snap.symbols[: args.top]
+    else:
+        symbols = []
+    if "open_interest" in streams and not symbols:
+        raise SystemExit("open_interest needs --symbols or --top (per-symbol poll)")
+    state = record.RecorderState(
+        symbols=symbols,
+        streams=streams,
+        minutes=args.minutes,
+        silence_alert=args.silence_alert,
+    )
+    print(
+        f"recording {','.join(streams)}"
+        + (f" for {len(symbols)} symbols" if symbols else " (all-market flows)")
+    )
+    try:
+        asyncio.run(record.run(state))
+    except KeyboardInterrupt:
+        print("^C — final flushed", file=sys.stderr)
+    return 0
+
+
 def cmd_universe(args: argparse.Namespace) -> int:
     if args.action == "sync":
         for market in ("spot", "um"):
@@ -183,6 +214,29 @@ def main(argv: list[str] | None = None) -> int:
         help="also re-check every inventory file's upstream checksum",
     )
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("record", help="accumulate liquidation/funding/OI feeds")
+    p.add_argument("--streams", default="liquidations,funding,open_interest")
+    p.add_argument("--symbols", default="", help="csv (per-symbol polls)")
+    p.add_argument(
+        "--top",
+        type=int,
+        default=0,
+        help="first N from the latest " "um universe snapshot",
+    )
+    p.add_argument(
+        "--minutes",
+        type=float,
+        default=0.0,
+        help="stop after N minutes (default: run until ^C)",
+    )
+    p.add_argument(
+        "--silence-alert",
+        type=float,
+        default=300.0,
+        help="log a gap when the liquidations stream pushes nothing for N seconds",
+    )
+    p.set_defaults(func=cmd_record)
 
     p = sub.add_parser("universe", help="dated symbol-list snapshots")
     p.add_argument("action", choices=["sync", "show"])

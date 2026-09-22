@@ -1,6 +1,11 @@
 # Personal Quant — Research Bootstrap Plan (M0–M3)
 
-Status: **plan, proposed 2026-09-22; nothing built yet.** Companion to
+Status: **plan proposed 2026-09-22; M0 shipped and live-verified the same
+day** (`src/quantdesk/`, `quant` CLI — archive download/verify, hive convert,
+universe snapshots, BTCUSDT um 1m + funding round-trip clean), **recorder
+(`quant record`) shipped**: funding and OI recorded live, liquidations feed
+implemented and silence-watched but its positive path awaits a network where
+`fstream.binance.com` pushes (TODO.md). Companion to
 `personal-quant-trading-exploration.md`, which owns the *why* (capital
 arithmetic, channel walls, cost layers). This document owns the *how*
 of one deliberately narrow slice: the **research pipeline only** —
