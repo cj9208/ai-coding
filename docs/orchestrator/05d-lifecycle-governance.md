@@ -1,15 +1,18 @@
 # Orchestrator Scaling Sub-plan 05d — Lifecycle & Governance
 
-Status: **executing 2026-09-22** — step 1 landed: the erasure decision
-is recorded in the contract ("Governance Records", record G-1:
-crypto-erase, effective at the first EU/PIPL tenant with legal
-sign-off); step 2 landed: the handoff worklist (`handoff_tickets` +
-`worklist|claim|resolve`, contract record G-2); step 3 landed:
-`envelope.config_hash` + replay display + the release checklist in
-`03-usage.md`. Derived from `04-scaling.md`; one of four sub-plans
-(05a–05d). Suggested execution order: **4th** — most of its items are
-decisions to be made on schedule, not code to be written early; the
-capability-health signal joined late (04 ledger, §6c).
+Status: **executable part complete 2026-09-22** — step 1 landed: the
+erasure decision is recorded in the contract ("Governance Records",
+record G-1: crypto-erase, effective at the first EU/PIPL tenant with
+legal sign-off); step 2 landed: the handoff worklist
+(`handoff_tickets` + `worklist|claim|resolve`, contract record G-2);
+step 3 landed: `envelope.config_hash` + replay display + the release
+checklist in `03-usage.md` (contract record G-3, which splits its
+trigger — see §4). Steps 4–5 remain gated as checked (registry
+governance at ≈20 entries vs 3 today; the health signal "never
+before" the service host). Derived from `04-scaling.md`; one of four
+sub-plans (05a–05d). Suggested execution order: **4th** — most of its
+items are decisions to be made on schedule, not code to be written
+early; the capability-health signal joined late (04 ledger, §6c).
 
 **One sentence:** decide the three governance questions the code cannot
 answer by itself (erasure, registry fields, config-as-release) and

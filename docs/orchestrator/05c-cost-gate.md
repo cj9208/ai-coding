@@ -1,11 +1,13 @@
 # Orchestrator Scaling Sub-plan 05c — Cost Gate
 
-Status: **executing 2026-09-22** — steps 1 (cost model), 2 (quota
-gate) and 3 (deterministic fast path, behind a default-off flag)
-landed; the routing-row change went through as a contract amendment
-(`docs/orchestrator-design.md`, "Amendment 2026-09-22: the quota
-row"). Step 3's GO and step 4's NO-GO-for-now are the cost model's
-conclusions — see §1.
+Status: **executable part complete 2026-09-22** — steps 1 (cost
+model), 2 (quota gate) and 3 (deterministic fast path, behind a
+default-off flag) landed; the routing-row change went through as a
+contract amendment (`docs/orchestrator-design.md`, "Amendment
+2026-09-22: the quota row"). Step 3's GO and step 4's NO-GO-for-now
+are the cost model's conclusions — see §1; the cache stays parked
+until real traffic can price its hit rate, so no 05c work is
+executable without a long-lived host.
 
 **One sentence:** cut per-request LLM spend with a boolean quota gate,
 a deterministic fast path that bypasses flash interpretation, and a

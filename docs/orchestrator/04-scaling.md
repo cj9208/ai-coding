@@ -68,7 +68,7 @@ only prose here.
 | §6c no circuit breaker (`health: degraded`) | **open — now owned**: adopted by 05d (design sketch 5, step 5) after this ledger found it in no sub-plan | 05d, triggered by a capability with real external deps behind the service host |
 | §6d `handoff export` linear payload scan | **open, deliberately minor** — ≤200 already-filtered rows, bench-irrelevant | ride-along fix when `cli.py` is next touched |
 | A.1 Chinese-only safety gate | **fixed** — per-locale packs (zh verbatim + en first tranche); missing pack now clarifies via `s_unsupported_locale` instead of silently allowing | 05b step 1 (2026-09-22); en content review continues |
-| A.2 registry governance | **open** — trigger (≈20 entries) not reached; first DP-5 renegotiation pressure | 05d |
+| A.2 registry governance | **open** — trigger (≈20 entries) not reached (checked 2026-09-22: 3 entries); first DP-5 renegotiation pressure | 05d step 4, gated as checked |
 | A.3 erasure law vs append-only | **decided, unbuilt** — contract record G-1 (2026-09-22): crypto-erase (per-user data keys, zero row edits, DP-7 audit untouched), effective at the first EU/PIPL tenant with legal sign-off; implementation stays gated on that date | 05d step 1 (decision) done; code awaits the trigger |
 | A.4 config-as-release | **half landed** — `envelope.config_hash` + replay drift display close the silent-drift hole today (release checklist written into 03-usage); per-region versioned artifact *process* still gated on the service host | 05d step 3 (2026-09-22) + host |
 | A.5 batching → Postgres, in that order | **batching done; Postgres closed as "won't trigger"** for pilot-A throughput, with named reopen conditions | 05a steps 3–4 (verdict) |
