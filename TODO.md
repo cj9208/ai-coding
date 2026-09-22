@@ -72,15 +72,19 @@ the four remaining questions are recorded as resolved-as-deferred in
       `uv run quant record --streams liquidations --minutes 10` from a network
       where futures WS works and check `data/quantdesk/recorded/liquidations/`
       is non-empty.
-- [ ] **photo_desk: one real HEIC read + one NAS-mounted scan.** M0 is verified
-      on a generated JPEG/PNG tree only: this machine's pillow-heif wheel
-      decodes but cannot encode, so no `.heic` fixture exists, and
-      `PHOTO_ROOT` has never pointed at a live Synology share. After the NAS
+- [ ] **photo_desk: one real HEIC read + one NAS-mounted scan (now incl. M1
+      triage).** M0+M1 are verified on generated JPEG trees only: this machine's
+      pillow-heif wheel decodes but cannot encode, so no `.heic` fixture exists,
+      and `PHOTO_ROOT` has never pointed at a live Synology share. After the NAS
       arrives: `uv run photos scan --root <mounted> --data-dir <out>` over a
       few hundred real photos (check EXIF/GPS parse and first-scan wall clock
       over SMB), open one iPhone burst in the timeline and confirm HEIC
-      thumbnails render — this also closes the burst-identifier field check
-      (`docs/photo-desk-design.md` §6-3) that M1 grouping depends on.
+      thumbnails render, then run one real `photos triage` dry-run and eyeball
+      the ranking against a human pick. This also closes the burst-identifier
+      field check (`docs/photo-desk-design.md` §6-3): grouping level 1
+      (`burst_id`) ships as constant None until a real Apple BurstIdentifier is
+      confirmed readable, so on-device bursts currently lean on the
+      EXIF-millisecond rule — verify it actually fires on iPhone bursts.
 - [ ] **notify: finish the editable reinstall once the other session's
       `photos serve` stops.** M0 shipped and `python -m notify.cli` smoke-passed,
       but `uv pip install -e .` died on a locked `photos.exe`, so the
