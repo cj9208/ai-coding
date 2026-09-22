@@ -53,6 +53,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="answer a pending clarification instead of starting a request",
     )
     p.add_argument("--user", default="cli_user")
+    p.add_argument(
+        "--locale",
+        default="zh",
+        help="front-half policy pack (orchestrator.packs; zh|en)",
+    )
     p.set_defaults(func=_cmd_ask)
     p = sub.add_parser("status", help="list recent requests, or one in detail")
     p.add_argument("request_id", nargs="?")
@@ -98,7 +103,9 @@ def _cmd_ask(store: Store, args: argparse.Namespace) -> int:
         if args.resume:
             result = orchestrator.resume(args.resume, args.text)
         else:
-            result = orchestrator.run_turn(args.text, user_id=args.user)
+            result = orchestrator.run_turn(
+                args.text, user_id=args.user, locale=args.locale
+            )
     except Exception as exc:  # front-half failure, or a CAS loss on --resume
         print(f"ask failed: {exc}", file=sys.stderr)
         return 1

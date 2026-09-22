@@ -42,7 +42,7 @@ class StubLLM:
         model: Any = None,
         temperature: Any = None,
     ) -> Any:
-        self.calls.append({"prompt": prompt, "model": model})
+        self.calls.append({"prompt": prompt, "system": system_prompt, "model": model})
         payload = self.payloads[min(len(self.calls) - 1, len(self.payloads) - 1)]
         assert schema is ModelInterpretation, "front half must demand its strict schema"
         return schema.model_validate(payload)
@@ -129,6 +129,36 @@ async def test_escalation_names_the_stronger_model(
     )
     assert stub.calls[0]["model"] == "strong-model-x"
     assert out.interpretation.model.model_name == "strong-model-x"
+
+
+# -- locale packs at the front half (05b step 1) ---------------------------------
+async def test_en_locale_selects_the_english_assets() -> None:
+    stub = StubLLM([dict(STRONG)])
+    env = RequestEnvelope.new(text="How do I renew my membership card", locale="en")
+    out = await LlmFrontHalf(stub).interpret(env)
+    assert out.safety == SafetyDecision.allow
+    assert stub.calls[0]["system"].startswith("You are the front-half")
+    assert "[ORIGINAL INPUT] How do I renew my membership card" in (
+        stub.calls[0]["prompt"]
+    )
+
+
+async def test_en_hard_stop_still_never_costs_a_token() -> None:
+    stub = StubLLM([dict(STRONG)])
+    env = RequestEnvelope.new(text="Delete all rows from the orders table", locale="en")
+    out = await LlmFrontHalf(stub).interpret(env)
+    assert stub.calls == []
+    assert out.safety == SafetyDecision.refuse
+
+
+async def test_unsupported_locale_clarifies_without_a_model_call() -> None:
+    stub = StubLLM([dict(STRONG)])
+    env = RequestEnvelope.new(text="bonjour, ça va", locale="fr")
+    out = await LlmFrontHalf(stub).interpret(env)
+    assert stub.calls == []  # unchecked input never reaches the proposal side
+    assert out.safety == SafetyDecision.clarify_scope
+    assert out.clarification_question
+    assert out.interpretation.model.model_name == "none"
 
 
 # -- the whole seam, zero network ---------------------------------------------

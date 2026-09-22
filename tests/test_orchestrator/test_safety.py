@@ -1,10 +1,14 @@
 """safety gate: every table row fires, hard stops precede soft ones, and a
-verdict always exists (the allow default is total)."""
+verdict always exists (the allow default is total).
+
+Since 05b step 1 the rows are the zh locale pack's table — this file is
+the "zh behavior did not move" proof for the pack extraction."""
 
 import pytest
 
 from orchestrator import safety
 from orchestrator.contracts import ActionType, RiskLevel, SafetyDecision
+from orchestrator.packs import PACKS
 
 # (row_id, text) — one per row, mirroring test_policy's row-coverage posture
 FIRINGS = {
@@ -18,7 +22,7 @@ FIRINGS = {
 
 
 def test_every_row_fires() -> None:
-    assert set(FIRINGS) == {row.row_id for row in safety.SAFETY_TABLE}
+    assert set(FIRINGS) == {row.row_id for row in PACKS["zh"].safety_table}
 
 
 @pytest.mark.parametrize(("row_id", "text"), sorted(FIRINGS.items()))

@@ -1,8 +1,13 @@
 # Orchestrator Scaling Sub-plan 05b — Trust Boundary
 
-Status: **proposed 2026-09-22** — derived from `04-scaling.md`; one of
-four sub-plans (05a–05d). Suggested execution order: **2nd**, except
-its step 1, which is independent and can start today.
+Status: **step 1 landed and live-verified 2026-09-22** (per-locale packs:
+`orchestrator/packs/` with zh verbatim + first-tranche en; `s_unsupported_locale`
+clarifies with zero model calls; `orchestrate ask --locale en` proven against
+the real flash model). Step 4 (adversarial golden class) is now runnable and
+is the next unit of work; steps 2–3 stay gated on the service host per the
+trigger below, step 5 is a documentation task. Derived from
+`04-scaling.md`; one of four sub-plans (05a–05d). Suggested execution
+order: **2nd**, except its step 1, which was independent and is done.
 
 **One sentence:** close the four trust holes the ladder exposed —
 language, identity, replay visibility, adversarial input — with the
@@ -135,6 +140,50 @@ asserted identity (step 2) and enforces quota as a boolean signal
 4. Adversarial golden class (needs step 1) wired into the release
    suite.
 5. Gateway contract documented in `03-usage.md`.
+
+## Step 1 implementation notes (landed 2026-09-22)
+
+- **Pack shape.** `src/orchestrator/packs/`: `base.py` (the two dataclass
+  shapes, a leaf so zh/en can import them without a package cycle),
+  `zh.py` (all three assets verbatim), `en.py` (first tranche),
+  `__init__.py` (registry, `get_pack`, `UNSUPPORTED_VERDICT`). Deviation
+  from the sketch's "one directory per locale, three files": the tables
+  are code-as-data with compiled regexes (DP-7), so one module per
+  locale — a YAML layout would only move drift risk from behavior to
+  shape without buying a loader anyone asked for.
+- **The sketch's call form survives.** `safety.evaluate(text, locale)` is
+  still the gate entry point; `safety.py` now owns row shape +
+  `first_match` + that locale-aware `evaluate`, which reaches the
+  registry through a *late* import (packs build tables from safety's
+  types — the module-level cycle is broken at exactly one edge).
+- `normalize(text)` without a table still means zh (its default aliases
+  come from the zh pack), so pre-05b call sites behave identically;
+  locale-aware callers pass `pack.aliases`.
+- **Unsupported locales short-circuit before the model**, stricter than
+  the sketch required: `LlmFrontHalf` sees no pack and clarifies with
+  `model_name="none"` — zero tokens for unchecked input, mirroring the
+  refuse/handoff posture.
+- **The en pack** mirrors the zh categories in the same CH01 order, with
+  IGNORECASE (capitalization is signal English has and Chinese hasn't).
+  `ALIASES` is empty, so normalization degrades to NFC + whitespace
+  collapse — honest, not fabricated hits. Content review continues.
+- **Finding — what the goldens actually freeze:** `FakeFrontHalf` scripts
+  safety decisions directly, so the golden suite never touches the pack
+  tables. The zh byte-freeze therefore rests on three other proofs: a
+  byte-exact prompt-assembly unit test, the untouched pass of
+  `test_safety.py`/`test_normalize.py`, and 17/17 goldens (routing
+  unchanged). Worth knowing before anyone proposes "covering" more
+  front-half assets with goldens.
+- **CLI:** `orchestrate ask --locale zh|en`; `--resume` needs no flag —
+  the stored envelope carries the locale. Cosmetic known gap: the CLI's
+  own hint lines stay Chinese under `--locale en`.
+- **Live proof (real flash model):** `ask --locale en "How do I renew my
+  Chunhui savings card"` → the model answered with an *English*
+  clarification question, `[awaiting_clarification]`
+  `req_01M33S6DY5WKKH80CY5E53R1TH`.
+- Tests: +21 (18 `test_packs.py`, 3 front-half locale cases in
+  `test_interpret.py`; `StubLLM` now also captures the system prompt).
+  Suite 572 passed / 1 skipped; mypy clean.
 
 ## Verification
 

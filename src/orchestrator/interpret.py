@@ -10,6 +10,10 @@ Seam discipline:
   signals, and every budget/routing consequence downstream);
 - ``refuse``/``handoff`` from the safety gate short-circuit before any call
   — a refused request never costs a token;
+- the three language-scoped front-half assets (safety table, alias table,
+  prompt) are selected by ``envelope.original_input.locale`` — caller
+  context, never model output — and a missing pack clarifies instead of
+  allowing (05b step 1, ``orchestrator.packs``);
 - one ``interpret`` call = at most one model call, **awaited** — the
   async ``llm_client`` method is called directly (05a step 5: no
   ``asyncio.run`` inside the turn, which is what lets the harness be
@@ -36,6 +40,7 @@ from .contracts import (
 )
 from .ids import new_id
 from .normalize import normalize
+from .packs import LocalePack, get_pack
 
 
 #: the strict-JSON shape the flash model must return — everything the model
@@ -71,13 +76,9 @@ class ModelInterpretation(_Contract):
         return True
 
 
-SYSTEM_PROMPT = (
-    "你是企业请求编排系统的前半程解释器，负责把员工请求解析成结构化解释。"
-    "规则：不翻译、不改写用户原文；只提出解释，不做任何执行决定。"
-    "拿不准时降低 confidence 并填写 ambiguity_flags 与 clarification_question，"
-    "不要编造。只输出一个 JSON 对象。"
-)
-
+#: the task-type vocabulary is harness-wide (the routing table and the
+#: registry both key on it), so only its *prose* is localized — the
+#: enumeration is injected into each pack's instruction template.
 _TASK_TYPES = "faq_howto | lookup | comparison | process_question | other"
 
 
@@ -104,19 +105,33 @@ class LlmFrontHalf:
         escalated: bool = False,
     ) -> FrontHalfOutput:
         text = envelope.original_input.text
-        verdict = safety_gate.evaluate(text)
+        # locale is caller context (set by run_turn), never model output —
+        # a proposal must not choose the table that gates it (05b)
+        pack = get_pack(envelope.original_input.locale)
+        if pack is None:
+            # unchecked input: clarify without spending a token on an
+            # interpretation the harness would not route anyway
+            return self._assemble(
+                envelope,
+                normalize(text, aliases={}),
+                safety_gate.evaluate(text, envelope.original_input.locale),
+                answer=answer,
+                model=None,
+                model_name="none",
+            )
+        verdict = safety_gate.evaluate(text, pack.locale)
         if verdict.decision in (SafetyDecision.refuse, SafetyDecision.handoff):
             # hard stop: deterministic, before any probabilistic step
-            norm = normalize(text)
+            norm = normalize(text, aliases=pack.aliases)
             return self._assemble(
                 envelope, norm, verdict, answer=answer, model=None, model_name="none"
             )
 
-        norm = normalize(f"{text} {answer}" if answer else text)
+        norm = normalize(f"{text} {answer}" if answer else text, aliases=pack.aliases)
         model_name = Models.ESCALATED if escalated else Models.FLASH
         raw = await self.client.chat_json(
-            self._prompt(envelope, norm, answer, escalated),
-            SYSTEM_PROMPT,
+            self._prompt(pack, envelope, norm, answer, escalated),
+            pack.prompt.system,
             schema=ModelInterpretation,
             **({"model": model_name} if model_name else {}),
         )
@@ -137,33 +152,24 @@ class LlmFrontHalf:
     # -- prompt -------------------------------------------------------------
     def _prompt(
         self,
+        pack: LocalePack,
         envelope: RequestEnvelope,
         norm: Any,
         answer: str | None,
         escalated: bool,
     ) -> str:
-        lines = [
-            f"【原始输入】{envelope.original_input.text}",
-        ]
+        p = pack.prompt
+        lines = [p.raw_input.format(text=envelope.original_input.text)]
         if answer:
-            lines.append(f"【用户对澄清问题的回答】{answer}")
+            lines.append(p.answer.format(answer=answer))
+        hits = p.join.join(norm.alias_hits) if norm.alias_hits else p.none_label
         lines += [
-            f"【确定性归一化查询】{norm.normalized_query}",
-            f"【别名命中】{'、'.join(norm.alias_hits) if norm.alias_hits else '无'}",
+            p.normalized_query.format(query=norm.normalized_query),
+            p.alias_hits.format(hits=hits),
         ]
         if escalated:
-            lines.append("【说明】这是对上次解释的升级复核，请更审慎地给出解释。")
-        lines.append(
-            "请输出 JSON，字段："
-            f"task_type（{_TASK_TYPES} 之一）、target_entity_guess、"
-            "requested_attributes（数组）、interpretation_summary（一句话）、"
-            "confidence（0~1）、ambiguity_flags（数组）、"
-            "alternative_interpretations（数组）、clarification_question"
-            "（中文，仅在需要用户补充时）、user_resolvable_ambiguity"
-            "（布尔，只填 true/false）、missing_required_constraint"
-            "（布尔，只填 true/false，缺失内容写进 clarification_question）、"
-            "constraints（对象，可为空）。"
-        )
+            lines.append(p.escalation)
+        lines.append(p.instructions.format(task_types=_TASK_TYPES))
         return "\n".join(lines)
 
     # -- assembly -----------------------------------------------------------

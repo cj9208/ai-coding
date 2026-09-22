@@ -217,5 +217,10 @@ are already there). Env convention lives only in
   "won't trigger" — plus the async surface (`FrontHalf.interpret`/
   `Capability.run` are coroutines; `run_turn_async`/`resume_async`
   embed in a running loop, sync shims keep CLI/golden/bench unchanged).
-  The service host that would consume all this is unbuilt; 05b–05d are
-  still proposals. The contract stays the decisions authority.
+  **05b step 1 landed the same day**: front-half assets are per-locale
+  packs in `src/orchestrator/packs/` (zh verbatim + en first tranche;
+  `safety.evaluate(text, locale)`; an unknown locale clarifies via
+  `s_unsupported_locale` — the old silent-allow fallthrough for
+  non-Chinese input is gone). The service host that would consume the
+  rest is unbuilt; remaining 05b–05d steps are gated on their triggers.
+  The contract stays the decisions authority.

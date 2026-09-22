@@ -67,7 +67,7 @@ only prose here.
 | §6b stale `RagStore` handle | **fixed** — handle reopens when the kb file's `(mtime_ns, size)` changes; in-process publishes stay visible through the cached handle | 05a step 5 (E); 05c's answer cache now has its version key to build on |
 | §6c no circuit breaker (`health: degraded`) | **open — now owned**: adopted by 05d (design sketch 5, step 5) after this ledger found it in no sub-plan | 05d, triggered by a capability with real external deps behind the service host |
 | §6d `handoff export` linear payload scan | **open, deliberately minor** — ≤200 already-filtered rows, bench-irrelevant | ride-along fix when `cli.py` is next touched |
-| A.1 Chinese-only safety gate | **open** | 05b step 1 (independent lane, can start today) |
+| A.1 Chinese-only safety gate | **fixed** — per-locale packs (zh verbatim + en first tranche); missing pack now clarifies via `s_unsupported_locale` instead of silently allowing | 05b step 1 (2026-09-22); en content review continues |
 | A.2 registry governance | **open** — trigger (≈20 entries) not reached; first DP-5 renegotiation pressure | 05d |
 | A.3 erasure law vs append-only | **open decision** — must land before the first EU tenant | 05d |
 | A.4 config-as-release | **open** | 05d |
@@ -296,6 +296,14 @@ benchmark; every claim cites the file that makes it.
    `OriginalInput.locale` — carried today, consumed by nothing (verified:
    zero reads) — finally becomes a routing input. This is the first
    place where "Chinese is first-class" quietly becomes "Chinese only".
+
+   > **Landed (05b step 1, 2026-09-22):** the assets moved into
+   > `orchestrator/packs/` verbatim for zh; `OriginalInput.locale` is
+   > consumed by the front half (caller-set, never model-set); an
+   > unknown locale is a named clarify row, not a silent `s0_allow`.
+   > En pack is a first tranche — row categories mirrored from zh,
+   > aliases authoring still open.
+
 2. **The registry is one team's file.** At 50–200 capabilities,
    `select()`'s first-match-in-declaration-order (DP-5 single-level) is a
    collision hazard, and four catalog fields that exist *for* governance

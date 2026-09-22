@@ -26,9 +26,9 @@ behind them.
   `--db <path>` is a **global** flag — put it before the subcommand:
   `orchestrate --db /tmp/test.db status`.
 
-## `orchestrate ask TEXT [--resume REQ_ID] [--user U]`
+## `orchestrate ask TEXT [--resume REQ_ID] [--user U] [--locale L]`
 
-The M1 front half (safety gate → Chinese alias normalize → flash
+The M1 front half (locale-pack safety gate → alias normalize → flash
 interpretation) plus the full harness loop, in one process.
 
 - Fresh request: `orchestrate ask "春晖省钱卡每月抵扣上限是多少"`.
@@ -38,6 +38,11 @@ interpretation) plus the full harness loop, in one process.
   *answer*, not a new question.
 - `--user` records the profile in the envelope (DP-8); it is threaded
   through every object but enforces nothing in v1.
+- `--locale` (default `zh`) picks the front-half **policy pack** — safety
+  table, alias table, and prompt (05b). Authored packs: `zh`, `en`
+  (`src/orchestrator/packs/`). Any other locale clarifies via
+  `s_unsupported_locale` with zero model calls; a resume keeps the
+  locale stored on the envelope.
 
 Output shapes:
 

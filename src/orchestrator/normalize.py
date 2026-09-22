@@ -10,9 +10,10 @@ Contract with the rest of the front half:
   ``assess.confidence_of`` — a strong alias hit is positive evidence the
   routing table can trust without any model involvement.
 
-``ALIASES`` is data-as-code (DP-7 posture): canonical name -> known
-short/alternative names, longest match wins. Promotion to a config file is
-not planned before M2's registry YAML.
+``ALIASES`` is data-as-code (DP-7 posture), authored inside the zh locale
+pack since 05b step 1 — ``normalize(text)`` without an explicit table
+selects the zh pack, so pre-05b call sites behave identically. Locale-
+aware callers pass ``pack.aliases`` for the caller's locale.
 """
 
 from __future__ import annotations
@@ -22,14 +23,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
-#: canonical entity name -> alias spellings (Chinese nicknames, short names,
-#: mixed-language forms). Sample enterprise vocabulary; extend by row.
-ALIASES: dict[str, tuple[str, ...]] = {
-    "春晖省钱卡": ("春晖卡", "省钱卡", "春晖省钱卡"),
-    "费用报销系统": ("报销系统", "报销平台", "费用报销", "报销"),
-    "人事服务": ("HR服务", "hr服务", "人事系统"),
-    "差旅标准": ("出差标准", "差旅政策"),
-}
+from .packs.zh import ALIASES
 
 _COLLAPSE = re.compile(r"\s+")
 

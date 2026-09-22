@@ -62,10 +62,14 @@ ask it questions; the contract first if you intend to *change* behavior;
   `list_requests` 188 ms→<1 ms at 100k rows); and the async surface —
   `interpret`/`Capability.run` are coroutines, `run_turn_async`/
   `resume_async` embed the harness in a running event loop while sync
-  shims keep CLI/golden/bench unchanged (repo suite 551 green).
-  Postgres is closed as "won't trigger"; the *service host* is the
-  next build, and 05b–05d await their triggers. 04 carries a
-  **problem status ledger** — read it first for per-problem state.
+  shims keep CLI/golden/bench unchanged. Postgres is closed as "won't
+  trigger"; the *service host* is the next build. 05b's independent lane
+  also landed the same day — **per-locale front-half packs**
+  (`orchestrator/packs/`, zh verbatim + en first tranche; unknown
+  locale clarifies, never silently allows; live-proven with an English
+  ask on the real flash model). Remaining 05b–05d steps await their
+  triggers. 04 carries a **problem status ledger** — read it first for
+  per-problem state.
 
 ## Data at a glance
 

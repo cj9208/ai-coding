@@ -27,9 +27,15 @@ contract's per-milestone Implementation Notes are the official record of
                        time-sortable
 
  THE FRONT HALF (M1)
- interpret.py    217   LlmFrontHalf: gate -> normalize -> flash chat_json
- safety.py       120   SAFETY_TABLE s1..s5+s0, first-match, pre-model
- normalize.py    103   ALIASES + specificity scoring, traceable rule hits
+ interpret.py    217   LlmFrontHalf: gate -> normalize -> flash chat_json,
+                       all three assets selected by the caller's locale pack
+ safety.py       ~85   SafetyRow/Verdict shapes + first-match + locale-aware
+                       evaluate (late pack lookup; no silent allow on miss)
+ packs/          05b   per-locale front-half assets: base.py (shapes),
+                       zh.py (s1..s5+s0 + ALIASES + prompt, pre-05b verbatim),
+                       en.py (first tranche, IGNORECASE rows, no aliases yet)
+ normalize.py    103   specificity scoring, traceable rule hits
+                       (default ALIASES now come from the zh pack)
  config.py        47   Budget / Thresholds / Models defaults, env overrides
 
  THE CAPABILITIES (M2/M3)
