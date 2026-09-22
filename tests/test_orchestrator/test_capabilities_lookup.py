@@ -66,9 +66,9 @@ def _ctx(query: str = "发票 归档") -> CapabilityContext:
 
 
 # -- translation ---------------------------------------------------------------
-def test_hits_map_to_success_with_records_and_refs() -> None:
+async def test_hits_map_to_success_with_records_and_refs() -> None:
     cap, _ = _cap(SearchResult(hits=[_hit(7), _hit(8)], total=2))
-    result = cap.run(_ctx())
+    result = await cap.run(_ctx())
     assert result.status == ResultStatus.success
     assert result.output["result_count"] == 2
     assert [r["id"] for r in result.output["records"]] == [7, 8]
@@ -78,9 +78,9 @@ def test_hits_map_to_success_with_records_and_refs() -> None:
     assert "差旅发票" in result.output["answer_markdown"]
 
 
-def test_zero_hits_is_weak_insufficient_evidence() -> None:
+async def test_zero_hits_is_weak_insufficient_evidence() -> None:
     cap, _ = _cap(SearchResult(hits=[], total=0))
-    result = cap.run(_ctx())
+    result = await cap.run(_ctx())
     assert result.status == ResultStatus.weak
     assert result.code == "insufficient_evidence"
     # still contract-shaped: the required fields are present so the
@@ -89,44 +89,44 @@ def test_zero_hits_is_weak_insufficient_evidence() -> None:
     assert "没有匹配" in result.output["answer_markdown"]
 
 
-def test_relaxed_mode_is_reported_in_output() -> None:
+async def test_relaxed_mode_is_reported_in_output() -> None:
     cap, _ = _cap(SearchResult(hits=[_hit()], total=1, relaxed=True))
-    result = cap.run(_ctx())
+    result = await cap.run(_ctx())
     assert result.output["match_mode"] == "relaxed"
 
 
-def test_empty_query_asks_the_user_not_the_db() -> None:
+async def test_empty_query_asks_the_user_not_the_db() -> None:
     cap, backend = _cap(SearchResult())
-    result = cap.run(_ctx("   "))
+    result = await cap.run(_ctx("   "))
     assert result.status == ResultStatus.weak
     assert result.code == "user_constraint_missing"
     assert result.output["clarification"]
     assert backend.queries == []  # the search was never attempted
 
 
-def test_db_failure_is_structured_not_a_crash() -> None:
+async def test_db_failure_is_structured_not_a_crash() -> None:
     cap, _ = _cap(exc=RuntimeError("unable to open database file"))
-    result = cap.run(_ctx())
+    result = await cap.run(_ctx())
     assert result.status == ResultStatus.failed
     assert result.code == "dependency_unavailable"
     assert "unable to open" in result.output["error"]
 
 
 # -- the query handed to the domain --------------------------------------------
-def test_normalized_query_reaches_the_backend_verbatim() -> None:
+async def test_normalized_query_reaches_the_backend_verbatim() -> None:
     cap, backend = _cap(SearchResult(hits=[_hit()], total=1))
-    cap.run(_ctx("报销 单号"))
+    await cap.run(_ctx("报销 单号"))
     (sq,) = backend.queries
     assert sq.q == "报销 单号"
     assert sq.page_size == 10  # DEFAULT_LIMIT
 
 
-def test_conservative_constraint_is_noop_for_exact_data() -> None:
+async def test_conservative_constraint_is_noop_for_exact_data() -> None:
     # DP-10 widens *retrieval of generated answers*; a record list has no
     # recall/precision tradeoff to manage, so the adapter ignores it —
     # assert that stays true if someone is tempted to "handle" it later
     cap, backend = _cap(SearchResult(hits=[_hit()], total=1))
-    cap.run(
+    await cap.run(
         CapabilityContext(
             request_id="r",
             session_id="s",

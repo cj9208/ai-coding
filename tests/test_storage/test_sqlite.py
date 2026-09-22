@@ -7,7 +7,13 @@ import pytest
 from sqlalchemy import DateTime, String, Text, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from storage import SqliteClient, ensure_columns, sha256_hex, to_db_url
+from storage import (
+    BUSY_TIMEOUT_MS,
+    SqliteClient,
+    ensure_columns,
+    sha256_hex,
+    to_db_url,
+)
 
 
 class Base(DeclarativeBase):
@@ -46,6 +52,15 @@ def test_wal_and_foreign_keys_applied_per_engine(client: SqliteClient):
         fk = db.connection().exec_driver_sql("PRAGMA foreign_keys").scalar()
     assert str(mode).lower() == "wal"
     assert fk is not None and int(fk) == 1
+
+
+def test_busy_timeout_applied_per_engine(client: SqliteClient):
+    """Contending writers must wait before they error, and the wait length
+    is policy with one home. Measured by ``scripts/orch_bench_run.py``:
+    8 concurrent writers degrade to a 2.2 s P99 *inside* this window."""
+    with client.session() as db:
+        timeout = db.connection().exec_driver_sql("PRAGMA busy_timeout").scalar()
+    assert timeout is not None and int(timeout) == BUSY_TIMEOUT_MS
 
 
 def test_pragma_listener_does_not_leak_across_engines(tmp_path: Path):

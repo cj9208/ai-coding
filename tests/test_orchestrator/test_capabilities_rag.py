@@ -63,13 +63,13 @@ def patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 # -- outcome translation ------------------------------------------------------
-def test_answered_maps_to_success_with_citations(patched: dict) -> None:
+async def test_answered_maps_to_success_with_citations(patched: dict) -> None:
     patched["answer"] = Answer(
         outcome=Outcome.answered,
         text="年假 5 天[1]，需提前申请[2]。",
         claims=[Claim(text="年假 5 天", refs=[1]), Claim(text="需提前申请", refs=[2])],
     )
-    result = RagQueryCapability().run(_ctx())
+    result = await RagQueryCapability().run(_ctx())
     assert result.status == ResultStatus.success
     assert result.confidence_signals["grounding_coverage"] == 1.0
     anchors = [c["anchor"] for c in result.output["citations"]]
@@ -77,70 +77,70 @@ def test_answered_maps_to_success_with_citations(patched: dict) -> None:
     assert result.evidence_refs == ["doc1.pdf#p1", "doc2.pdf#p2"]
 
 
-def test_partial_withholds_citations_and_scores_coverage(patched: dict) -> None:
+async def test_partial_withholds_citations_and_scores_coverage(patched: dict) -> None:
     patched["answer"] = Answer(
         outcome=Outcome.partial,
         text="部分回答[1]，未证实的部分。",
         claims=[Claim(text="部分回答", refs=[1]), Claim(text="未证实", refs=[])],
     )
-    result = RagQueryCapability().run(_ctx())
+    result = await RagQueryCapability().run(_ctx())
     assert result.status == ResultStatus.success
     assert "citations" not in result.output  # required-field gap -> v6 path
     assert result.confidence_signals["grounding_coverage"] == 0.5
 
 
-def test_clarify_becomes_user_constraint_missing(patched: dict) -> None:
+async def test_clarify_becomes_user_constraint_missing(patched: dict) -> None:
     patched["answer"] = Answer(
         outcome=Outcome.clarify, text="", clarification="你想问哪类假？"
     )
-    result = RagQueryCapability().run(_ctx())
+    result = await RagQueryCapability().run(_ctx())
     assert result.status == ResultStatus.weak
     assert result.code == "user_constraint_missing"
     assert result.output["clarification"] == "你想问哪类假？"
 
 
-def test_insufficient_becomes_weak_evidence(patched: dict) -> None:
+async def test_insufficient_becomes_weak_evidence(patched: dict) -> None:
     patched["answer"] = Answer(outcome=Outcome.insufficient, notes="evidence too weak")
-    result = RagQueryCapability().run(_ctx())
+    result = await RagQueryCapability().run(_ctx())
     assert result.status == ResultStatus.weak
     assert result.code == "insufficient_evidence"
 
 
-def test_retrieve_crash_is_structured_failure(
+async def test_retrieve_crash_is_structured_failure(
     patched: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def boom(*a: Any, **kw: Any) -> EvidencePack:
         raise RuntimeError("no such table: chunks")
 
     monkeypatch.setattr(rag_cap, "retrieve", boom)
-    result = RagQueryCapability().run(_ctx())
+    result = await RagQueryCapability().run(_ctx())
     assert result.status == ResultStatus.failed
     assert result.code == "dependency_unavailable"
 
 
 # -- DP-10: the conservative constraint lands on retrieval width --------------
-def test_default_k(patched: dict) -> None:
+async def test_default_k(patched: dict) -> None:
     patched["answer"] = Answer(
         outcome=Outcome.answered, claims=[Claim(text="a", refs=[1])]
     )
-    RagQueryCapability().run(_ctx())
+    await RagQueryCapability().run(_ctx())
     assert patched["retrieve_kwargs"]["k"] == 5
 
 
-def test_conservative_widens_k_by_factor(patched: dict) -> None:
+async def test_conservative_widens_k_by_factor(patched: dict) -> None:
     patched["answer"] = Answer(
         outcome=Outcome.answered, claims=[Claim(text="a", refs=[1])]
     )
-    RagQueryCapability().run(_ctx({"conservative": True, "topk_factor": 1.5}))
+    await RagQueryCapability().run(_ctx({"conservative": True, "topk_factor": 1.5}))
     assert patched["retrieve_kwargs"]["k"] == 8  # ceil(5 * 1.5)
 
 
-def test_capability_never_sees_the_envelope(patched: dict) -> None:
+async def test_capability_never_sees_the_envelope(patched: dict) -> None:
     patched["answer"] = Answer(
         outcome=Outcome.answered, claims=[Claim(text="a", refs=[1])]
     )
     ctx = _ctx()
-    RagQueryCapability().run(ctx)
+    await RagQueryCapability().run(ctx)
     assert patched["retrieve_kwargs"]["question"] == "年假怎么休"
     assert ctx.normalized_query == "年假怎么休"  # untouched by the adapter
 

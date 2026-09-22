@@ -99,7 +99,7 @@ def _cmd_ask(store: Store, args: argparse.Namespace) -> int:
             result = orchestrator.resume(args.resume, args.text)
         else:
             result = orchestrator.run_turn(args.text, user_id=args.user)
-    except Exception as exc:  # the front half is the only failure surface
+    except Exception as exc:  # front-half failure, or a CAS loss on --resume
         print(f"ask failed: {exc}", file=sys.stderr)
         return 1
     if result.question:

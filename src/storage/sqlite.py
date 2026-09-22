@@ -1,9 +1,10 @@
 """SQLite client — the access layer for the only database type in use today.
 
 Everything here is *SQLite knowledge*, learned the hard way in this repo:
-- WAL + foreign_keys on every connection; the PRAGMA listener must attach to
-  the engine *instance* (a class-level listener on ``Engine`` re-registers on
-  every make_engine call and leaks into unrelated engines in the process).
+- WAL + foreign_keys + an explicit ``busy_timeout`` on every connection; the
+  PRAGMA listener must attach to the engine *instance* (a class-level listener
+  on ``Engine`` re-registers on every make_engine call and leaks into
+  unrelated engines in the process).
 - ``check_same_thread=False`` so one engine can serve FastAPI's threadpool.
 - Lightweight additive schema patches (``ensure_columns``) instead of a
   migration framework: small single-user DBs only ever need ADD COLUMN.
@@ -24,6 +25,15 @@ from sqlalchemy import MetaData, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql import Executable
+
+#: How long a writer waits for the SQLite write lock before ``database is
+#: locked``. pysqlite already defaults to 5 s; naming it here makes the
+#: policy explicit and tunable in one place. Measured by
+#: ``scripts/orch_bench_run.py`` (docs/orchestrator/05a-data-plane.md):
+#: 8 concurrent writers turn a 32 ms P99 into 2.2 s *inside* this window —
+#: contention surfaces as tail latency first, errors only past the timeout.
+#: Waiting is a band-aid; batching the writes (05a step 3) is the cure.
+BUSY_TIMEOUT_MS = 5000
 
 
 def to_db_url(target: str | Path) -> str:
@@ -52,6 +62,7 @@ def make_engine(db_url: str) -> Engine:
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             cursor.close()
 
     return engine

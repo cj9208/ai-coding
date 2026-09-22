@@ -171,6 +171,13 @@ class StateRefs(_Contract):
     #: wall-clock instant of entering awaiting_clarification; consumed into
     #: ``ExecutionBudget.wall_clock_paused_ms`` at the resume edge
     wait_started_ms: int | None = None
+    #: optimistic-concurrency token, mirrored from ``requests.version`` — the
+    #: column is the authority on read, the bump happens on write
+    #: (docs/orchestrator/05a-data-plane.md §B)
+    version: int = 1
+    #: next ``runtime_objects.seq`` for this request; per-request state, so
+    #: it belongs on the envelope (DP-8) rather than a MAX(seq)+1 read
+    next_seq: int = 1
 
 
 class RequestEnvelope(_Contract):

@@ -15,18 +15,26 @@ One ``run_turn``/``resume`` call = one CLI turn: the loop ends at a
 non-terminal wait state (``awaiting_clarification``) or a terminal state;
 budget state survives the process boundary because it lives on the
 persisted envelope (DP-8).
+
+Two entry faces, one loop (05a step 5): ``run_turn_async``/
+``resume_async`` are awaitable from an ASGI/queue-worker host — the loop
+body is unchanged, only its two slow points are awaited — and the sync
+``run_turn``/``resume`` are boundary shims for the CLI, the golden suite
+and the bench (``asyncio.run`` lives only here, never inside a turn).
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from . import assess, policy
 from .capabilities.builtin import build_handoff_packet
-from .config import Thresholds
+from .config import Lifecycle, Thresholds
 from .contracts import (
+    AttemptCounters,
     CapabilityContext,
     CapabilityExecutionRecord,
     CapabilityResult,
@@ -105,6 +113,19 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _refuse_inside_loop(sync_entry: str, async_entry: str) -> None:
+    """Checked before the coroutine is built: an aborted shim must not
+    also leak a 'never awaited' warning on top of its clear error."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(
+        f"{sync_entry}() is the sync entry point; inside a running event"
+        f" loop await {async_entry}() instead"
+    )
+
+
 @dataclass
 class _Turn:
     """Mutable per-turn scratch; the envelope stays the only *durable*
@@ -145,6 +166,28 @@ class Orchestrator:
         locale: str = "zh",
         budget: Any = None,
     ) -> TurnResult:
+        """Sync shim: CLI, golden suite, bench. Fails fast inside a
+        running loop — async hosts call :meth:`run_turn_async`."""
+        _refuse_inside_loop("run_turn", "run_turn_async")
+        return asyncio.run(
+            self.run_turn_async(
+                text,
+                user_id=user_id,
+                session_id=session_id,
+                locale=locale,
+                budget=budget,
+            )
+        )
+
+    async def run_turn_async(
+        self,
+        text: str,
+        *,
+        user_id: str = "cli_user",
+        session_id: str | None = None,
+        locale: str = "zh",
+        budget: Any = None,
+    ) -> TurnResult:
         envelope = RequestEnvelope.new(
             text=text,
             user_id=user_id,
@@ -152,12 +195,20 @@ class Orchestrator:
             locale=locale,
             budget=budget,
         )
-        self.store.create_request(envelope)
-        self.store.emit(envelope.request_id, "request_captured", self._now(), text=text)
+        with self.store.transact():
+            self.store.create_request(envelope)
+            self.store.emit(
+                envelope.request_id, "request_captured", self._now(), text=text
+            )
         turn = _Turn()
-        return self._drive(envelope, turn)
+        return await self._drive(envelope, turn)
 
     def resume(self, request_id: str, answer: str) -> TurnResult:
+        """Sync shim, same contract as :meth:`run_turn`."""
+        _refuse_inside_loop("resume", "resume_async")
+        return asyncio.run(self.resume_async(request_id, answer))
+
+    async def resume_async(self, request_id: str, answer: str) -> TurnResult:
         envelope = self.store.get_request(request_id)
         if envelope is None:
             raise ValueError(f"unknown request: {request_id}")
@@ -167,57 +218,113 @@ class Orchestrator:
                 " not awaiting clarification"
             )
         now = self._now()
-        self.store.append_object(
-            request_id, "clarification_answer", {"answer": answer}, now
-        )
-        self.store.emit(request_id, "clarification_received", now, answer=answer)
-        self._transition(envelope, RequestStatus.interpreting)
+        gap_ms = now - (envelope.state.wait_started_ms or now)
+        expired = gap_ms > Lifecycle.CLARIFICATION_TTL_MS
+        with self.store.transact():
+            if expired:
+                self._expire_stale_wait(envelope, now, gap_ms)
+            self._append(envelope, "clarification_answer", {"answer": answer}, now)
+            self.store.emit(
+                request_id,
+                "clarification_received",
+                now,
+                answer=answer,
+                **({"expired_ttl_ms": gap_ms} if expired else {}),
+            )
+            self._transition(envelope, RequestStatus.interpreting)
         turn = _Turn(pending_answer=answer)
-        return self._drive(envelope, turn)
+        return await self._drive(envelope, turn)
+
+    def _expire_stale_wait(
+        self, envelope: RequestEnvelope, now: int, gap_ms: int
+    ) -> None:
+        """A wait past the TTL ends the interpretation it would continue.
+
+        DP-4 subtracts human latency out of the wall clock, which is right
+        for machine budgets and leaves one side effect: a request from six
+        months ago is still resumable, against a registry, alias table and
+        corpus that have moved on. So the resumed turn re-derives
+        capability selection and gets a fresh *machine* budget, while
+        ``clarification_turns`` — a lifecycle bound, not a cost bound —
+        survives. The event keeps the gap auditable (DP-7).
+        """
+        envelope.attempt_counters = AttemptCounters(
+            clarification_turns=envelope.attempt_counters.clarification_turns
+        )
+        envelope.state.selected_capability = None
+        envelope.state.selected_domain = None
+        self.store.emit(
+            envelope.request_id,
+            "clarification_expired",
+            now,
+            gap_ms=gap_ms,
+            ttl_ms=Lifecycle.CLARIFICATION_TTL_MS,
+        )
 
     # -- the loop --------------------------------------------------------------
-    def _drive(self, envelope: RequestEnvelope, turn: _Turn) -> TurnResult:
+    async def _drive(self, envelope: RequestEnvelope, turn: _Turn) -> TurnResult:
+        """One loop pass = one commit, except where the turn has to wait on
+        something slow (the front half, a capability) — those stages keep
+        their writes outside the call and group them with ``transact()``.
+        Holding the SQLite write lock across an LLM call would turn a
+        batching win into a contention loss.  The two slow points are
+        ``await``ed (05a step 5); every decision-table step in between
+        stays synchronous, so the loop's structure is what it always was."""
         while True:
             now = self._now()
             if assess.wall_clock_exceeded(envelope, now):
                 return self._finish_failed(envelope, turn, "wall_clock_exceeded")
             status = envelope.state.current_status
             if status == RequestStatus.captured:
-                self._transition(envelope, RequestStatus.interpreting)
+                with self.store.transact():
+                    self._transition(envelope, RequestStatus.interpreting)
             elif status == RequestStatus.interpreting:
-                self._interpret(envelope, turn)
+                await self._interpret(envelope, turn)
             elif status == RequestStatus.routing:
-                result = self._route(envelope, turn, now)
+                with self.store.transact():
+                    result = self._route(envelope, turn, now)
                 if result is not None:
                     return result
             elif status == RequestStatus.executing:
-                self._execute(envelope, turn)
+                await self._execute(envelope, turn)
             elif status == RequestStatus.validating:
-                result = self._validate(envelope, turn)
+                with self.store.transact():
+                    result = self._validate(envelope, turn)
                 if result is not None:
                     return result
             else:
                 return self._turn_result(envelope, turn)
 
-    def _interpret(self, envelope: RequestEnvelope, turn: _Turn) -> None:
-        out = self.front_half.interpret(
+    def _append(
+        self, envelope: RequestEnvelope, kind: str, payload: Any, now_ms: int
+    ) -> str:
+        """Append one object, taking ``seq`` from the envelope counter
+        (DP-8: per-request state lives on the envelope, not in a
+        read-then-write ``MAX(seq)+1`` query)."""
+        seq = envelope.state.next_seq
+        envelope.state.next_seq = seq + 1
+        return self.store.append_object(envelope.request_id, kind, payload, now_ms, seq)
+
+    async def _interpret(self, envelope: RequestEnvelope, turn: _Turn) -> None:
+        # the model call is awaited *before* any write, so no lock is held
+        # across it; the three writes after it group into one commit
+        out = await self.front_half.interpret(
             envelope, answer=turn.pending_answer, escalated=turn.escalated
         )
         turn.pending_answer = None
         turn.escalated = False
         turn.out = out
         now = self._now()
-        self.store.append_object(
-            envelope.request_id, "interpretation", out.interpretation, now
-        )
-        self.store.emit(
-            envelope.request_id,
-            "interpretation_created",
-            now,
-            interpretation_id=out.interpretation.interpretation_id,
-            task_type=out.interpretation.task_type,
-        )
-        self._transition(envelope, RequestStatus.routing)
+        with self.store.transact():
+            self._append(envelope, "interpretation", out.interpretation, now)
+            self.store.emit(
+                envelope.request_id,
+                "interpretation_created",
+                now,
+                interpretation_id=out.interpretation.interpretation_id,
+                task_type=out.interpretation.task_type,
+            )
+            self._transition(envelope, RequestStatus.routing)
 
     def _route(
         self, envelope: RequestEnvelope, turn: _Turn, now: int
@@ -284,7 +391,7 @@ class Orchestrator:
             next_action=NextAction(type=decision.value, payload=payload),
         )
         turn.decision_ids.append(rd.routing_decision_id)
-        self.store.append_object(envelope.request_id, "routing", rd, now)
+        self._append(envelope, "routing", rd, now)
         self.store.emit(
             envelope.request_id,
             "routing_decided",
@@ -324,7 +431,7 @@ class Orchestrator:
         # handoff_human (r2 / r9 / fallback override)
         return self._finish_handoff(envelope, turn, rd.decision_reason.primary)
 
-    def _execute(self, envelope: RequestEnvelope, turn: _Turn) -> None:
+    async def _execute(self, envelope: RequestEnvelope, turn: _Turn) -> None:
         assert turn.out is not None and envelope.state.selected_capability
         name = envelope.state.selected_capability
         entry = self.registry.entry(name)
@@ -344,7 +451,9 @@ class Orchestrator:
             envelope.request_id, "capability_execution_started", now, capability=name
         )
         try:
-            result = impl.run(ctx)
+            # awaited outside any transact(): the write lock is never held
+            # across the capability call itself
+            result = await impl.run(ctx)
         except Exception:  # a crash is a structured failure, never a re-raise
             result = CapabilityResult(
                 status=ResultStatus.failed, code="capability_crashed", output={}
@@ -377,17 +486,18 @@ class Orchestrator:
         )
         turn.last_result = result
         envelope.attempt_counters.tool_calls += len(result.tool_steps)
-        self.store.append_object(envelope.request_id, "execution", rec, end)
-        self.store.emit(
-            envelope.request_id,
-            "capability_execution_completed",
-            end,
-            execution_id=rec.execution_id,
-            status=result.status.value,
-            code=result.code,
-            duration_ms=rec.duration_ms,
-        )
-        self._transition(envelope, RequestStatus.validating)
+        with self.store.transact():
+            self._append(envelope, "execution", rec, end)
+            self.store.emit(
+                envelope.request_id,
+                "capability_execution_completed",
+                end,
+                execution_id=rec.execution_id,
+                status=result.status.value,
+                code=result.code,
+                duration_ms=rec.duration_ms,
+            )
+            self._transition(envelope, RequestStatus.validating)
 
     def _validate(self, envelope: RequestEnvelope, turn: _Turn) -> TurnResult | None:
         assert turn.last_result is not None and envelope.state.selected_capability
@@ -555,7 +665,7 @@ class Orchestrator:
             used_execution_ids=list(turn.used_execution_ids),
             fallback_history=list(turn.fallback_history),
         )
-        self.store.append_object(envelope.request_id, "outcome", fo, now)
+        self._append(envelope, "outcome", fo, now)
         envelope.state.final_outcome_ref = fo.final_outcome_id
         self._transition(envelope, RequestStatus.completed)
         self.store.emit(
@@ -602,7 +712,7 @@ class Orchestrator:
             objects=objects,
             now_ms=now,
         )
-        self.store.append_object(envelope.request_id, "handoff", packet, now)
+        self._append(envelope, "handoff", packet, now)
         self._transition(envelope, RequestStatus.handoff)
         self.store.emit(
             envelope.request_id,
@@ -638,7 +748,7 @@ class Orchestrator:
             outcome_type=outcome_type,
             user_response=reason,
         )
-        self.store.append_object(envelope.request_id, "outcome", fo, now)
+        self._append(envelope, "outcome", fo, now)
         envelope.state.final_outcome_ref = fo.final_outcome_id
         self._transition(envelope, status)
         self.store.emit(envelope.request_id, event, now, reason=reason)

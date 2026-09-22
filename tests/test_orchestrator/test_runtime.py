@@ -84,6 +84,42 @@ class TestTurnFlow:
             total_loops=2, clarification_turns=1, tool_calls=1
         )
 
+    def test_a_request_resumed_elsewhere_cannot_be_resumed_again(
+        self, store: Store
+    ) -> None:
+        """A second process that read the request before the first one
+        finished is refused at resume's status gate; the interleaved-write
+        case (both read while still awaiting, then both commit) is refused
+        one layer down by the version CAS — see
+        ``test_store.py::test_update_request_is_a_compare_and_set``."""
+        orch1 = Orchestrator(store, make_registry(), FakeFrontHalf([AMBIGUOUS]))
+        first = orch1.run_turn("那个卡")
+        assert first.status == RequestStatus.awaiting_clarification
+
+        winner = Orchestrator(store, make_registry(), FakeFrontHalf([STRONG]))
+        loser = Orchestrator(store, make_registry(), FakeFrontHalf([STRONG]))
+        assert (
+            winner.resume(first.request_id, "春晖卡").status == RequestStatus.completed
+        )
+        with pytest.raises(ValueError, match="not awaiting"):
+            loser.resume(first.request_id, "春晖卡")
+
+        # the winner's counters survived: nothing was silently overwritten
+        env = store.get_request(first.request_id)
+        assert env is not None
+        assert env.attempt_counters.clarification_turns == 1
+
+    def test_object_seq_comes_from_the_envelope_counter(self, store: Store) -> None:
+        """DP-8: the seq lives on the envelope, so no read-then-write
+        MAX(seq)+1 race; replay ordering is unchanged."""
+        orch = Orchestrator(store, make_registry(), FakeFrontHalf([STRONG]))
+        done = orch.run_turn("q")
+        env = store.get_request(done.request_id)
+        assert env is not None
+        seqs = [o["seq"] for o in store.objects(done.request_id)]
+        assert seqs == list(range(1, len(seqs) + 1))
+        assert env.state.next_seq == len(seqs) + 1
+
     def test_resume_rejects_non_awaiting_request(self, store: Store) -> None:
         orch = Orchestrator(store, make_registry(), FakeFrontHalf([STRONG]))
         done = orch.run_turn("q")
@@ -127,6 +163,38 @@ class TestTurnFlow:
         assert env is not None
         assert env.execution_budget.wall_clock_paused_ms >= 3_600_000 - 1_000
         assert env.state.wait_started_ms is None
+
+    def test_resume_past_the_ttl_restarts_from_a_clean_machine_budget(
+        self, store: Store
+    ) -> None:
+        """DP-4 makes a parked request resumable forever; past the TTL the
+        interpretation it would continue is stale, so the resumed turn gets
+        fresh machine counters while the lifecycle bound survives."""
+        import time
+
+        from orchestrator.config import Lifecycle
+
+        start = int(time.time() * 1000)
+        t = {"now": start}
+        orch = Orchestrator(
+            store,
+            make_registry(),
+            FakeFrontHalf([AMBIGUOUS, STRONG]),
+            now_ms=lambda: t["now"],
+        )
+        first = orch.run_turn("那个卡")
+        assert first.status == RequestStatus.awaiting_clarification
+        t["now"] = start + Lifecycle.CLARIFICATION_TTL_MS + 1_000  # months later
+        second = orch.resume(first.request_id, "春晖卡")
+        assert second.status == RequestStatus.completed
+
+        env = store.get_request(first.request_id)
+        assert env is not None
+        assert env.attempt_counters == AttemptCounters(
+            total_loops=1, clarification_turns=1, tool_calls=1
+        )
+        events = [e["event"] for e in store.events(first.request_id)]
+        assert "clarification_expired" in events
 
     def test_illegal_transition_is_refused(self, store: Store) -> None:
         from orchestrator.contracts import RequestEnvelope

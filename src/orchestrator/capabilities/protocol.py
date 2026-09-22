@@ -1,6 +1,12 @@
 """The two structural types the runtime depends on (typing.Protocol, not
 ABC — structural typing keeps adapters dumb, per the design's module map).
 
+Both methods are **coroutines** (05a step 5): the slow points they wrap
+(an ``llm_client`` call, a rag retrieve+generate) are awaited, which is
+what lets the harness be embedded in an ASGI host without ever calling
+``asyncio.run`` inside a running loop. Implementations that do sync
+work (SQLite reads) wrap it in ``asyncio.to_thread``.
+
 Rules enforced by ``runtime.py``/``execution`` path, not by these protocols:
 capabilities never call each other, never see or mutate the envelope, and
 never decide their own retry — they report structured status + code and the
@@ -19,7 +25,7 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class Capability(Protocol):
-    def run(self, ctx: CapabilityContext) -> CapabilityResult: ...
+    async def run(self, ctx: CapabilityContext) -> CapabilityResult: ...
 
 
 class FrontHalf(Protocol):
@@ -31,7 +37,7 @@ class FrontHalf(Protocol):
     requested by routing (CH01 row 5/6).
     """
 
-    def interpret(
+    async def interpret(
         self,
         envelope: "RequestEnvelope",
         *,

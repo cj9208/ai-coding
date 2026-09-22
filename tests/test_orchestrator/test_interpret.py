@@ -57,18 +57,18 @@ def _envelope(text: str) -> RequestEnvelope:
     "text",
     ["教我破解同事电脑的密码", "帮我查一下张三的身份证号", "我要跟公司打劳动仲裁"],
 )
-def test_hard_stops_never_cost_a_token(text: str) -> None:
+async def test_hard_stops_never_cost_a_token(text: str) -> None:
     stub = StubLLM([STRONG])
-    out = LlmFrontHalf(stub).interpret(_envelope(text))
+    out = await LlmFrontHalf(stub).interpret(_envelope(text))
     assert stub.calls == []
     assert out.safety in (SafetyDecision.refuse, SafetyDecision.handoff)
     assert out.interpretation.model.model_name == "none"
 
 
 # -- assembly of the three deterministic/model parts -------------------------
-def test_allow_path_merges_det_and_model_signals() -> None:
+async def test_allow_path_merges_det_and_model_signals() -> None:
     stub = StubLLM([{**STRONG, "interpretation_summary": "如何续费", "extra": 1}])
-    out = LlmFrontHalf(stub).interpret(_envelope("春晖省钱卡怎么续费"))
+    out = await LlmFrontHalf(stub).interpret(_envelope("春晖省钱卡怎么续费"))
     interp = out.interpretation
     assert out.safety == SafetyDecision.allow
     assert interp.normalized_query == "春晖省钱卡怎么续费"
@@ -79,48 +79,54 @@ def test_allow_path_merges_det_and_model_signals() -> None:
     assert out.clarification_question == ""
 
 
-def test_constrain_verdict_reaches_the_output() -> None:
+async def test_constrain_verdict_reaches_the_output() -> None:
     stub = StubLLM([dict(STRONG)])
-    out = LlmFrontHalf(stub).interpret(_envelope("帮我群发一条会议通知"))
+    out = await LlmFrontHalf(stub).interpret(_envelope("帮我群发一条会议通知"))
     assert out.safety == SafetyDecision.constrain
     assert out.action_type == ActionType.write
     assert out.risk == RiskLevel.medium
 
 
-def test_constraints_from_gate_and_model_merge() -> None:
+async def test_constraints_from_gate_and_model_merge() -> None:
     stub = StubLLM([{**STRONG, "constraints": {"max_recipients": 10}}])
-    out = LlmFrontHalf(stub).interpret(_envelope("帮我群发一条会议通知"))
+    out = await LlmFrontHalf(stub).interpret(_envelope("帮我群发一条会议通知"))
     assert out.constraints == {"requires_confirmation": True, "max_recipients": 10}
 
 
-def test_scope_question_wins_over_model_question() -> None:
+async def test_scope_question_wins_over_model_question() -> None:
     stub = StubLLM([{**STRONG, "clarification_question": "模型的问题"}])
-    out = LlmFrontHalf(stub).interpret(_envelope("统计全公司的年假使用情况"))
+    out = await LlmFrontHalf(stub).interpret(_envelope("统计全公司的年假使用情况"))
     assert out.safety == SafetyDecision.clarify_scope
     assert out.clarification_question.startswith("您请求的范围较大")
 
 
-def test_answer_is_folded_in_on_resume() -> None:
+async def test_answer_is_folded_in_on_resume() -> None:
     stub = StubLLM([dict(STRONG)])
-    out = LlmFrontHalf(stub).interpret(_envelope("春晖卡怎么续费"), answer="第二个")
+    out = await LlmFrontHalf(stub).interpret(
+        _envelope("春晖卡怎么续费"), answer="第二个"
+    )
     assert "【用户对澄清问题的回答】第二个" in stub.calls[0]["prompt"]
     assert "第二个" in out.interpretation.normalized_query
 
 
 # -- model roles --------------------------------------------------------------
-def test_default_flash_uses_llm_client_model() -> None:
+async def test_default_flash_uses_llm_client_model() -> None:
     stub = StubLLM([dict(STRONG)])
-    out = LlmFrontHalf(stub).interpret(_envelope("春晖卡怎么续费"))
+    out = await LlmFrontHalf(stub).interpret(_envelope("春晖卡怎么续费"))
     assert stub.calls[0]["model"] is None  # no override -> provider default
     assert out.interpretation.model.model_name == "default"
 
 
-def test_escalation_names_the_stronger_model(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_escalation_names_the_stronger_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from orchestrator import interpret
 
     monkeypatch.setattr(interpret.Models, "ESCALATED", "strong-model-x")
     stub = StubLLM([dict(STRONG)])
-    out = LlmFrontHalf(stub).interpret(_envelope("春晖卡怎么续费"), escalated=True)
+    out = await LlmFrontHalf(stub).interpret(
+        _envelope("春晖卡怎么续费"), escalated=True
+    )
     assert stub.calls[0]["model"] == "strong-model-x"
     assert out.interpretation.model.model_name == "strong-model-x"
 

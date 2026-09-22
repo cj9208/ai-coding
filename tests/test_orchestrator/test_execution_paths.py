@@ -58,7 +58,7 @@ class _StubCapability:
         self.fail_times = fail_times
         self.calls = 0
 
-    def run(self, ctx: Any) -> CapabilityResult:
+    async def run(self, ctx: Any) -> CapabilityResult:
         self.calls += 1
         if self.calls <= self.fail_times:
             raise RuntimeError("backend exploded")

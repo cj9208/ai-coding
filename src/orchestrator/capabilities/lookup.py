@@ -18,6 +18,7 @@ makes ``switch_capability`` (exec e4 / validation v3) actually runnable.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -46,7 +47,7 @@ class StructuredLookupCapability:
         self._client = client
         self._backend = backend
 
-    def run(self, ctx: CapabilityContext) -> CapabilityResult:
+    async def run(self, ctx: CapabilityContext) -> CapabilityResult:
         query = ctx.normalized_query.strip()
         if not query:
             return CapabilityResult(
@@ -57,7 +58,8 @@ class StructuredLookupCapability:
                 },
             )
         try:
-            result = self._search(query)
+            # the search is sync SQLite work — thread hop (05a step 5)
+            result = await asyncio.to_thread(self._search, query)
         except Exception as exc:  # a missing/locked file db is structured
             return CapabilityResult(
                 status=ResultStatus.failed,

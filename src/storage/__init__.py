@@ -31,6 +31,7 @@ subprojects feed ``llm_client.LLMSettings`` from their own config.
 from .cache import SqliteCache
 from .fts import FtsTable, fold_cjk, match_expr, token_expr
 from .sqlite import (
+    BUSY_TIMEOUT_MS,
     SqliteClient,
     ensure_columns,
     make_engine,
@@ -40,6 +41,7 @@ from .sqlite import (
 )
 
 __all__ = [
+    "BUSY_TIMEOUT_MS",
     "FtsTable",
     "SqliteCache",
     "SqliteClient",

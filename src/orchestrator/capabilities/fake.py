@@ -32,7 +32,7 @@ class FakeFrontHalf:
         self._turns = list(turns)
         self.calls: list[dict[str, Any]] = []
 
-    def interpret(
+    async def interpret(
         self,
         envelope: RequestEnvelope,
         *,
@@ -91,7 +91,7 @@ class EchoCapability:
     def __init__(self) -> None:
         self.contexts: list[CapabilityContext] = []
 
-    def run(self, ctx: CapabilityContext) -> CapabilityResult:
+    async def run(self, ctx: CapabilityContext) -> CapabilityResult:
         self.contexts.append(ctx)
         return CapabilityResult(
             status="success",
@@ -111,7 +111,7 @@ class ScriptedCapability:
         self._results = list(results)
         self.contexts: list[CapabilityContext] = []
 
-    def run(self, ctx: CapabilityContext) -> CapabilityResult:
+    async def run(self, ctx: CapabilityContext) -> CapabilityResult:
         self.contexts.append(ctx)
         idx = min(len(self.contexts) - 1, len(self._results) - 1)
         return CapabilityResult(**self._results[idx])

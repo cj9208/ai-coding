@@ -45,3 +45,15 @@ class Thresholds:
     GROUNDING_COVERAGE_MIN = 0.5
     #: DP-10 conservative retrieval: broaden top-k by this factor
     CONSERVATIVE_TOPK_FACTOR = 1.5
+
+
+class Lifecycle:
+    """Wait bounds DP-4 does not cover. Budgets account *machine* time; a
+    human's answer latency is subtracted out (``wall_clock_paused_ms``), so
+    the side effect is that an ``awaiting_clarification`` request is
+    resumable forever — against a registry, alias table and corpus that may
+    have moved on (``docs/orchestrator/04-scaling.md`` §5). Resume past this
+    gap re-interprets from a clean machine budget instead of continuing a
+    stale interpretation mid-flight."""
+
+    CLARIFICATION_TTL_MS = 7 * 24 * 3600 * 1000  # 7 days

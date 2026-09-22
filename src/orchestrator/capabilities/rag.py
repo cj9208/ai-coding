@@ -46,16 +46,19 @@ class RagQueryCapability:
         self._k = k
         self._client = client
         self._store: Any = None
+        self._store_identity: tuple[int, int] | None = None
 
-    def run(self, ctx: CapabilityContext) -> CapabilityResult:
+    async def run(self, ctx: CapabilityContext) -> CapabilityResult:
         k = self._k
         if ctx.constraints.get("conservative"):
             k = math.ceil(k * float(ctx.constraints.get("topk_factor", 1.5)))
         try:
-            pack = retrieve(self._get_store(), ctx.normalized_query, k=k)
-            answer = asyncio.run(
-                generate(pack, ctx.normalized_query, client=self._client)
+            # retrieve is sync SQLite work — a thread hop keeps the host's
+            # event loop free during it; generate is already async (05a #5)
+            pack = await asyncio.to_thread(
+                retrieve, self._get_store(), ctx.normalized_query, k=k
             )
+            answer = await generate(pack, ctx.normalized_query, client=self._client)
         except Exception as exc:  # a dead corpus is a structured failure
             return CapabilityResult(
                 status=ResultStatus.failed,
@@ -66,8 +69,32 @@ class RagQueryCapability:
 
     # -- internals ---------------------------------------------------------
     def _get_store(self) -> Any:
-        if self._store is None:
+        """Reopen the handle when the kb file is replaced on disk.
+
+        A long-lived host must not read a corpus that a ``rag build``
+        swapped out: SQLite connections opened against a deleted/renamed
+        file keep serving the old inode forever. ``(mtime_ns, size)`` is
+        the cheap identity — an in-process publish mutates the same file
+        (and stays visible through the cached handle's fresh read
+        transactions), while a rebuild replaces it and trips the reopen.
+        05c's answer cache keys on the resolved store's active version.
+        """
+        try:
+            st = self._kb_path.stat()
+            identity: tuple[int, int] | None = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            identity = None
+        if self._store is None or identity != self._store_identity:
+            if self._store is not None:
+                self._store.dispose()
             self._store = RagStore(self._kb_path)
+            # the constructor creates a missing db — record what is now on
+            # disk, or the next call would "reopen" against its own creation
+            try:
+                st = self._kb_path.stat()
+                self._store_identity = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                self._store_identity = None
         return self._store
 
     def _translate(self, answer: Answer, pack: EvidencePack) -> CapabilityResult:

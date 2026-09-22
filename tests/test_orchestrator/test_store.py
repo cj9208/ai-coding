@@ -7,7 +7,7 @@ import pydantic
 import pytest
 
 from orchestrator.contracts import RequestEnvelope, RequestStatus
-from orchestrator.store import Store
+from orchestrator.store import ConflictError, Store
 
 
 @pytest.fixture()
@@ -70,6 +70,74 @@ def test_objects_of_kind_finds_handoffs_across_requests(store: Store) -> None:
     rows = store.objects_of_kind("handoff")
     assert len(rows) == 2
     assert store.objects_of_kind("nope") == []
+
+
+def test_cross_request_reads_are_indexed(store: Store) -> None:
+    """Both cross-request reads sorted a whole table per call without these
+    (measured by ``scripts/orch_bench_run.py``: ``list_requests`` P50 188 ms
+    at 10^5 requests)."""
+    from sqlalchemy import inspect
+
+    engine = store._client.engine
+    req_cols = {
+        tuple(i["column_names"]) for i in inspect(engine).get_indexes("requests")
+    }
+    obj_cols = {
+        tuple(i["column_names"]) for i in inspect(engine).get_indexes("runtime_objects")
+    }
+    assert ("updated_at_ms",) in req_cols
+    assert ("kind", "created_at_ms") in obj_cols
+
+
+def test_update_request_is_a_compare_and_set(store: Store) -> None:
+    """Two readers of the same envelope must not both write: the loser gets
+    a typed ConflictError instead of silently overwriting the winner's
+    counters (docs/orchestrator/04-scaling.md §2)."""
+    env = RequestEnvelope.new(text="q")
+    store.create_request(env)
+    winner = store.get_request(env.request_id)
+    loser = store.get_request(env.request_id)
+    assert winner and loser
+
+    store.update_request(winner, now_ms=env.timestamp_start_ms + 10)
+    assert winner.state.version == 2
+    with pytest.raises(ConflictError) as exc:
+        store.update_request(loser, now_ms=env.timestamp_start_ms + 20)
+    assert exc.value.request_id == env.request_id
+    assert exc.value.expected_version == 1
+    # the loser's in-memory copy is left consistent with what it believes
+    assert loser.state.version == 1
+    # and the row still reflects only the winner
+    assert store.get_request(env.request_id).state.version == 2  # type: ignore[union-attr]
+
+
+def test_transact_commits_and_rolls_back_as_a_unit(store: Store) -> None:
+    env = RequestEnvelope.new(text="q")
+    with store.transact():
+        store.create_request(env)
+        store.emit(env.request_id, "request_captured", env.timestamp_start_ms, text="q")
+        store.append_object(env.request_id, "routing", {"a": 1}, env.timestamp_start_ms)
+    assert store.get_request(env.request_id) is not None
+
+    other = RequestEnvelope.new(text="q2")
+    with pytest.raises(RuntimeError):
+        with store.transact():
+            store.create_request(other)
+            store.emit(other.request_id, "request_captured", 0, text="q2")
+            raise RuntimeError("pass died before committing")
+    assert store.get_request(other.request_id) is None
+    assert store.events(other.request_id) == []
+
+
+def test_reads_inside_a_transact_see_its_own_writes(store: Store) -> None:
+    """A loop pass reads back objects it appended (the handoff packet does);
+    uncommitted-but-same-transaction must be visible."""
+    env = RequestEnvelope.new(text="q")
+    with store.transact():
+        store.create_request(env)
+        store.append_object(env.request_id, "handoff", {"x": 1}, env.timestamp_start_ms)
+        assert store.objects(env.request_id) != []
+    assert store.objects_of_kind("handoff") != []
 
 
 def test_original_input_is_write_once() -> None:

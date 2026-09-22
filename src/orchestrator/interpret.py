@@ -10,14 +10,14 @@ Seam discipline:
   signals, and every budget/routing consequence downstream);
 - ``refuse``/``handoff`` from the safety gate short-circuit before any call
   — a refused request never costs a token;
-- one ``interpret`` call = at most one model call, run synchronously via
-  ``asyncio.run`` (the control loop is serial by design; the async client is
-  an implementation detail of llm_client).
+- one ``interpret`` call = at most one model call, **awaited** — the
+  async ``llm_client`` method is called directly (05a step 5: no
+  ``asyncio.run`` inside the turn, which is what lets the harness be
+  embedded in an ASGI host).
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 
@@ -96,7 +96,7 @@ class LlmFrontHalf:
             self._client = get_client()
         return self._client
 
-    def interpret(
+    async def interpret(
         self,
         envelope: RequestEnvelope,
         *,
@@ -114,13 +114,11 @@ class LlmFrontHalf:
 
         norm = normalize(f"{text} {answer}" if answer else text)
         model_name = Models.ESCALATED if escalated else Models.FLASH
-        raw = asyncio.run(
-            self.client.chat_json(
-                self._prompt(envelope, norm, answer, escalated),
-                SYSTEM_PROMPT,
-                schema=ModelInterpretation,
-                **({"model": model_name} if model_name else {}),
-            )
+        raw = await self.client.chat_json(
+            self._prompt(envelope, norm, answer, escalated),
+            SYSTEM_PROMPT,
+            schema=ModelInterpretation,
+            **({"model": model_name} if model_name else {}),
         )
         interp = (
             raw
