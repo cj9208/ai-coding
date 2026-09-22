@@ -124,27 +124,33 @@ uv run quant verify --remote
 **Crypto-native top-20 backfill (M1 data, 2026-09-22):**
 
 ```bash
-uv run quant universe rank --market um --top 100 > /tmp/um_top100.csv   # stdout is one csv line
+UNIVERSE=data/quantdesk/universe
+uv run quant universe rank --market um --top 100 > $UNIVERSE/rank-um-top100-2026-09-22.csv   # stdout is one csv line
 # freeze the universe: first 20 CRYPTO-NATIVE names in ranking order,
 # skipping tokenized stock/commodity perps (XAU/XAG/CL/SOXL/SNDK/SPCX/
 # SKHYNIX/MSTR/MU/INTC/KORU/CRCL/…, mostly listed 2025-26) — the owner's
-# scope call: large caps only. Result (2026-09-22 ranking):
+# scope call: large caps only. Result (2026-09-22 ranking), recorded in
+# $UNIVERSE/screen-universe-um-top20-majors-2026-09-22.csv:
 #   BTC ETH SOL ZEC XRP DOGE 1000PEPE NEAR SUI HYPE
 #   BNB UNI TAO ENA ADA AVAX WLD ARB LINK LTC
-SYMS=$(cat /tmp/um_top20_majors.csv)
+SYMS=$(cat $UNIVERSE/screen-universe-um-top20-majors-2026-09-22.csv)
 uv run quant download --datasets um_klines_1d,um_funding_rate --symbols "$SYMS" --since 2021-01
 uv run quant convert  --datasets um_klines_1d,um_funding_rate --symbols "$SYMS" --since 2021-01
 ```
 
 (The rank file is a *frozen* universe — the selection rule and its day
-belong in the screening `--note`; ~2.7k planned files, `missing` months
-for late listings are normal and cost one 404 each since ceb595e.
-Observed throughput ≈ 1.4 s/file for old names.)
+belong in the screening `--note`; the frozen CSV itself sits under
+`data/quantdesk/universe/` beside the snapshots — gitignored like all
+of `data/`, but reconstructible from the rank file and, for the audit
+trail, byte-identical to the `spec.symbols` list committed in every
+manifest under `config/quantdesk/runs/`. ~2.7k planned files,
+`missing` months for late listings are normal and cost one 404 each
+since ceb595e. Observed throughput ≈ 1.4 s/file for old names.)
 
 **Screening the three pre-registered hypotheses (M1 acceptance):**
 
 ```bash
-SYMS=$(cat /tmp/um_top20_majors.csv)
+SYMS=$(cat data/quantdesk/universe/screen-universe-um-top20-majors-2026-09-22.csv)
 uv run quant screen --factor csm --symbols "$SYMS" --since 2022-01-01 --until 2026-06-30 \
                     --set hold=5 --note "m1 pre-reg: csm, 20-major universe 2026-09-22, hold=top quartile"
 uv run quant screen --factor tsm --symbols "$SYMS" --since 2022-01-01 --until 2026-06-30 \

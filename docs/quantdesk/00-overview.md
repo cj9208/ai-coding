@@ -87,6 +87,7 @@ Everything lives under `data/quantdesk/` (REPO_ROOT-anchored;
 | `recorded/<stream>/day=…/part-HHMMSS.<ns>.parquet` | the private dataset the recorder accumulates (funding/OI/liquidations) |
 | `recorded/gaps.log` | every dropout **and every alive-but-silent stream**, append-only |
 | `universe/<market>-<day>.json` | dated symbol-list snapshots — the as-of raw material |
+| `universe/rank-um-top100-<day>.csv`, `universe/screen-universe-um-top20-majors-<day>.csv` | the 2026-09-22 volume ranking and the frozen screening universe it produced (working copies; the audit truth is the `spec.symbols` list committed in every manifest) |
 
 And outside `data/`, because they are evidence rather than data:
 `config/quantdesk/trial_ledger.csv` (one row per variant ever evaluated,
