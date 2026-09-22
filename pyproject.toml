@@ -29,6 +29,7 @@ dependencies = [
     "websockets>=17.1",
     "pillow>=12.1.1",
     "pillow-heif>=1.8.0",
+    "numpy>=2.1",
 ]
 
 [project.optional-dependencies]

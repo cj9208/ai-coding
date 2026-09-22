@@ -11,9 +11,20 @@
             {%- if photo.taken_at is none %}（无 EXIF，取自文件时间）{% endif %}</td></tr>
     <tr><th>设备</th><td>{{ (photo.make or '') ~ ' ' ~ (photo.model or '') or '未知' }}</td></tr>
     <tr><th>尺寸</th><td>{{ photo.width }} × {{ photo.height }}</td></tr>
+    {% if photo.sharpness is not none %}
+    <tr><th>清晰度分</th><td>{{ '%.1f' % photo.sharpness }}</td></tr>
+    {% endif %}
+    {% if photo.group_id %}
+    <tr><th>连拍组</th><td>{{ photo.group_id }}</td></tr>
+    {% endif %}
+    {% if photo.state == 'quarantined' %}
+    <tr><th>状态</th><td>已隔离（photos restore --photo {{ photo.id }} 放回）</td></tr>
+    {% endif %}
     <tr><th>大小</th><td>{{ '%.1f' % (photo.size / 1048576) }} MB</td></tr>
     <tr><th>SHA-256</th><td><code>{{ photo.content_hash }}</code></td></tr>
+    {% if photo.state != 'quarantined' %}
     <tr><th>状态</th><td>{{ photo.state }}</td></tr>
+    {% endif %}
   </table>
 </div>
 {% endblock %}

@@ -1,4 +1,5 @@
-"""查看层路由：时间线 + 照片详情 + 派生图。M0 全部只读。"""
+"""查看层路由：时间线 + 照片详情 + 派生图。始终只读——隔离/放回写在 CLI
+（triage.py），放回按钮归 M2 编辑模式（记录在案的偏离）。quarantined 灰显。"""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from ..config import PhotoRootError
-from ..library import STATE_IN_PLACE, Photo, iter_photos
+from ..library import STATE_IN_PLACE, STATE_QUARANTINED, Photo, iter_photos
 from ..thumbs import ensure_image
 
 router = APIRouter()
@@ -34,7 +35,10 @@ def timeline(request: Request, db: Session = Depends(get_db)):
         )
 
     days: "OrderedDict[object, list[Photo]]" = OrderedDict()
-    for photo in iter_photos(db, state=STATE_IN_PLACE):
+    for photo in iter_photos(db, state=None):
+        # missing/orphaned 不展示：文件都不在，缩略图无从谈起
+        if photo.state not in (STATE_IN_PLACE, STATE_QUARANTINED):
+            continue
         days.setdefault(photo.day, []).append(photo)
     return templates.TemplateResponse(
         request,

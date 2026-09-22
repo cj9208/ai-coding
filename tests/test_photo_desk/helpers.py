@@ -60,6 +60,36 @@ def _dms(deg: float):
     )
 
 
+def make_burst_photo(
+    path: Path,
+    *,
+    taken_at: datetime,
+    subsec: str,
+    seed: int,
+    blur: float = 0.0,
+) -> Path:
+    """连拍样张：随机噪声底纹（blur=0 清晰 / blur>0 高斯模糊）。
+
+    make_photo 的纯色图高频恒零、清晰度分全是 0，组内相对排名跑不起来；
+    triage 相关测试必须有真实清晰度差。噪声按 seed 生成——每张字节唯一。
+    """
+    import numpy as np
+    from PIL import ImageFilter
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(seed)
+    arr = rng.integers(0, 256, (240, 320, 3), dtype=np.uint8)
+    img = Image.fromarray(arr)
+    if blur:
+        img = img.filter(ImageFilter.GaussianBlur(blur))
+    exif = img.getexif()
+    ifd = exif.get_ifd(0x8769)
+    ifd[36867] = taken_at.strftime("%Y:%m:%d %H:%M:%S")
+    ifd[37520] = subsec
+    img.save(path, exif=exif)
+    return path
+
+
 def make_settings(tmp_path: Path) -> Settings:
     root = tmp_path / "photo_root"
     root.mkdir(parents=True, exist_ok=True)

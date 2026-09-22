@@ -74,6 +74,37 @@ def test_missing_photo_404(client) -> None:
     assert client.get("/photo/9999/thumb.webp").status_code == 404
 
 
+def test_quarantined_cells_are_grayed_out(tmp_path) -> None:
+    from photo_desk.triage import apply_plan, build_plan
+
+    from .helpers import make_burst_photo
+
+    settings = make_settings(tmp_path)
+    base = datetime(2025, 6, 1, 12, 0)
+    make_burst_photo(
+        settings.root / "b" / "IMG_0001.jpg", taken_at=base, subsec="000", seed=1
+    )
+    make_burst_photo(
+        settings.root / "b" / "IMG_0002.jpg",
+        taken_at=base,
+        subsec="300",
+        seed=2,
+        blur=6,
+    )
+    storage = SqliteClient(settings.db_path)
+    storage.init_schema(Base.metadata)
+    with storage.session() as session:
+        scan(settings, session)
+        report = build_plan(settings, session)
+        assert apply_plan(settings, session, report.moves) == 1
+    storage.dispose()
+
+    c = TestClient(create_app(settings))
+    html = c.get("/").text
+    assert "cell quarantined" in html and "已隔离" in html
+    assert "photos restore --photo" in html  # 悬停提示给出放回命令
+
+
 def test_unmounted_root_shows_error_not_empty(tmp_path) -> None:
     from photo_desk.config import load_settings
 

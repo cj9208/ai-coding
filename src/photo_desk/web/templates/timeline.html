@@ -14,8 +14,11 @@
   <h2>{{ day }} <small>{{ photos|length }} 张</small></h2>
   <div class="grid">
     {% for p in photos %}
-    <a class="cell" href="/photo/{{ p.id }}" title="{{ p.rel_path }}">
+    <a class="cell{% if p.state == 'quarantined' %} quarantined{% endif %}"
+       href="/photo/{{ p.id }}"
+       title="{{ p.rel_path }}{% if p.state == 'quarantined' %}（已隔离，photos restore --photo {{ p.id }} 放回）{% endif %}">
       <img src="/photo/{{ p.id }}/thumb.webp" loading="lazy" alt="">
+      {% if p.state == 'quarantined' %}<span class="badge">已隔离</span>{% endif %}
     </a>
     {% endfor %}
   </div>

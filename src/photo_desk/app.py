@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from storage import SqliteClient
 
 from .config import Settings
-from .library import Base
+from .library import ensure_schema
 
 _WEB_DIR = Path(__file__).parent / "web"
 
@@ -18,7 +18,7 @@ _WEB_DIR = Path(__file__).parent / "web"
 def create_app(settings: Settings) -> FastAPI:
     settings.ensure_writable_dirs()
     storage = SqliteClient(settings.db_path)
-    storage.init_schema(Base.metadata)
+    ensure_schema(storage)
 
     app = FastAPI(title="photo_desk", docs_url=None, redoc_url=None)
     app.state.settings = settings
