@@ -1,9 +1,12 @@
 # Orchestrator Scaling Sub-plan 05d — Lifecycle & Governance
 
-Status: **proposed 2026-09-22** — derived from `04-scaling.md`; one of
-four sub-plans (05a–05d). Suggested execution order: **4th** — most of
-its items are decisions to be made on schedule, not code to be written
-early; the capability-health signal joined late (04 ledger, §6c).
+Status: **executing 2026-09-22** — step 1 landed: the erasure decision
+is recorded in the contract ("Governance Records", record G-1:
+crypto-erase, effective at the first EU/PIPL tenant with legal
+sign-off). Derived from `04-scaling.md`; one of four sub-plans
+(05a–05d). Suggested execution order: **4th** — most of its items are
+decisions to be made on schedule, not code to be written early; the
+capability-health signal joined late (04 ledger, §6c).
 
 **One sentence:** decide the three governance questions the code cannot
 answer by itself (erasure, registry fields, config-as-release) and
@@ -61,6 +64,15 @@ row-id audit untouched (DP-7's compliance value at rung B is exactly
 recorded decision in the contract — **before the first EU tenant, not
 after the first complaint** — and until then the contract's "Explicitly
 Not Doing" carries this item explicitly.
+
+**Landed as contract record G-1 (2026-09-22):** the lean became the
+decision — crypto-erase, per-user data keys at the store's
+serialization boundary, key deletion with zero row edits, envelope
+contract unchanged; tombstone rejected because it edits history and
+would make the DP-7 audit artifact conditional on the erasure ledger.
+The record fixes the shape, not the key-management product; effective
+date and legal-sign-off posture are as sketched above, and "Explicitly
+Not Doing" now points at G-1 instead of carrying the question silently.
 
 ### 2. Handoff worklist (the one additive build)
 
@@ -129,8 +141,9 @@ hammer a dead peer.
 
 ## Step sequence
 
-1. Erasure decision record in the contract (options, recommendation,
-   effective date = first EU tenant).
+1. ✅ Erasure decision record in the contract (2026-09-22, record G-1:
+   crypto-erase chosen over tombstone, effective date = first EU/PIPL
+   tenant with legal sign-off; implementation stays gated there).
 2. `handoff_tickets` table + `claim|resolve|worklist` CLI + goldens
    asserting packets are byte-identical before/after worklist use.
 3. `envelope.config_hash` + replay display + release-checklist section

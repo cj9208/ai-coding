@@ -69,7 +69,7 @@ only prose here.
 | §6d `handoff export` linear payload scan | **open, deliberately minor** — ≤200 already-filtered rows, bench-irrelevant | ride-along fix when `cli.py` is next touched |
 | A.1 Chinese-only safety gate | **fixed** — per-locale packs (zh verbatim + en first tranche); missing pack now clarifies via `s_unsupported_locale` instead of silently allowing | 05b step 1 (2026-09-22); en content review continues |
 | A.2 registry governance | **open** — trigger (≈20 entries) not reached; first DP-5 renegotiation pressure | 05d |
-| A.3 erasure law vs append-only | **open decision** — must land before the first EU tenant | 05d |
+| A.3 erasure law vs append-only | **decided, unbuilt** — contract record G-1 (2026-09-22): crypto-erase (per-user data keys, zero row edits, DP-7 audit untouched), effective at the first EU/PIPL tenant with legal sign-off; implementation stays gated on that date | 05d step 1 (decision) done; code awaits the trigger |
 | A.4 config-as-release | **open** | 05d |
 | A.5 batching → Postgres, in that order | **batching done; Postgres closed as "won't trigger"** for pilot-A throughput, with named reopen conditions | 05a steps 3–4 (verdict) |
 | A.6 handoff = headcount | **open** | 05d |

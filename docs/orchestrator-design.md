@@ -311,6 +311,43 @@ Semantics fixed by this amendment:
   the exhausted path. Goldens run as per-case users
   (`golden:<case_id>`) so one case's spend cannot leak into the next.
 
+## Governance Records
+
+Decisions the code cannot answer by itself, decided here (on schedule)
+rather than in a hurry. `docs/orchestrator/05d-lifecycle-governance.md`
+carries the triggers and the build consequences; the contract owns the
+decision.
+
+### Record G-1: erasure vs. append-only (05d step 1, 2026-09-22)
+
+**Question:** GDPR/PIPL right-to-be-forgotten vs the replay guarantee and
+append-only objects. User text today lives on every durable surface:
+`original_input.text` and `normalized_query` in the envelope, every
+`runtime_objects.payload_json` (interpretations echo it, the handoff
+packet embeds conversation context), and `events` payloads
+(`request_captured`, `clarification_received`). The architecture
+currently picks neither guarantee.
+
+**Decision: crypto-erase** — per-user data keys wrap the text surfaces;
+erasure deletes the key, which renders every stored copy unrecoverable
+with zero row edits.
+
+- Why: it leaves both load-bearing properties intact untouched — the
+  append-only store (DP-8) and the row-id audit (DP-7, whose rung-B
+  compliance value is exactly "these rows fired, in this order"). The
+  tombstone alternative (blank text fields in place) is cheaper to run
+  but *edits* history, so the replay story would have to redefine what
+  a blanked row proves — the audit artifact becomes conditional on the
+  erasure ledger.
+- Cost accepted: key-management infrastructure (key derivation, custody,
+  a deletion path that is itself auditable). Deferred, because —
+- **Effective date: the first EU (or PIPL-scope) tenant, with legal
+  sign-off at that date.** This record fixes the *shape* (crypto-erase,
+  key-deletion, zero row edits, envelope contract unchanged — the
+  encryption lives at the store's serialization boundary, e.g. one
+  `data_key_id` column on `requests`), not the key-management product
+  choice. Until the trigger, erasure stays under "Explicitly Not Doing".
+
 ## Control Loop
 
 Every return to `routing` runs CH02_02's four steps, in code:
@@ -578,6 +615,9 @@ Decisions the contract left open, now fixed in code:
 ## Explicitly Not Doing (v1)
 
 - Long-term agent memory (the notes defer it; boundaries undefined — stays deferred).
+- Erasure implementation — the *decision* is recorded (G-1: crypto-erase,
+  effective at the first EU/PIPL tenant); the code stays unbuilt until the
+  trigger, so today no stored user text can be deleted.
 - Multi-tenant auth or real permission backends: `policy_context` fields
   exist and are *threaded through every object*, but the only enforcement is
   "everything readable, profile recorded" — the seam is there, the lock is not.
