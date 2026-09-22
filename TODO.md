@@ -81,6 +81,16 @@ the four remaining questions are recorded as resolved-as-deferred in
       over SMB), open one iPhone burst in the timeline and confirm HEIC
       thumbnails render — this also closes the burst-identifier field check
       (`docs/photo-desk-design.md` §6-3) that M1 grouping depends on.
+- [ ] **notify: finish the editable reinstall once the other session's
+      `photos serve` stops.** M0 shipped and `python -m notify.cli` smoke-passed,
+      but `uv pip install -e .` died on a locked `photos.exe`, so the
+      `uv run notify` half of the M0 acceptance (design §5) is unproven:
+      stop that server, run `uv pip install -e .`, then `uv run notify status`.
+- [ ] **notify M1: one real Telegram delivery.** Needs `@BotFather` token +
+      own `chat_id` + a working `TELEGRAM_PROXY` in `.env`; then follow
+      `docs/notify-design.md` §5 M1 (alert in ~1 min on the phone, silence
+      alert from a faked 3h gap, throttle 5→2, unplug-proxy retry path).
+      policy.py / rules.py / expectations.yaml are M1 work, not owed yet.
 
 ## Next, if the demand is real
 

@@ -35,7 +35,7 @@ the others, except where noted below.
   (no markers needed).
 - CLI entry points: `pdf-summarize`, `ai-market-radar`, `file-manager`,
   `research-agent`, `ocr-backend`, `ocr-review`, `rag`, `skills`, `orchestrate`,
-  `quant`, `photos`
+  `quant`, `photos`, `notify`
   (`[project.scripts]`). `skills` is the one owner of vendored AI skills —
   `sync` / `list` / `outdated` / `add` (see "AI skills & specs").
   `ocr-backend` has three subcommands: `download <model>` (provisions a
@@ -74,6 +74,7 @@ are already there). Env convention lives only in
 |---|---|---|
 | `src/llm_client/` | shared LLM access point (see rule above) | — it *is* the LLM layer |
 | `src/storage/` | shared storage layer, one module per DB type in use (currently SQLite: `sqlite.py` engine/PRAGMA/session/ensure_columns/sha256_hex, `fts.py` fold_cjk/match_expr/FtsTable). Only generic access knowledge belongs here — table definitions and business stores stay in each project; see `docs/storage-usage-guide.md` | no |
+| `src/notify/` | shared notification layer (contract: `docs/notify-design.md`, rulings D-1..D-6 — do not re-derive): task code calls one facade `notify.emit(project, kind, **payload)` which appends a structured event to the SQLite ledger at `data/notify/events.db` and **never raises**; delivery happens only in short-lived `notify dispatch` (scheduler-launched, never a daemon), channels are pluggable adapters sharing one shape (stdout now; telegram + external ping in M1/M2, gated on `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`/`TELEGRAM_PROXY` in `.env`); "who watches the watcher" is closed at four stacked failure domains L1-L4, L4 being the human inversion "no daily digest = something is wrong" — the acknowledged limit, no VPS for it; **M0 shipped 2026-09-22** (config/events/ledger/channels/cli, 16 tests); CLI `notify emit / status / dispatch` | no |
 | `src/ocr_backend/` | shared OCR layer: one versioned `OcrDocument` contract (page → block, pixel bbox) + render projections (`page_text` / `document_markdown`); PaddleOCR-VL 1.6 is the first adapter (engine comes from the `paddle-cpu` / `paddle-gpu` extras; model snapshots live under `data/ocr_backend/models/<name>/`, provisioned by `ocr-backend download <name>` (each model is one `models.MODELS` entry, pinned to a commit sha) and resolved via `ocr_backend.models.model_dir`; see `docs/ocr-backend-design.md` §7 for the GPU index gotcha). Consumers read the contract, never a backend's native output | no |
 | `src/ocr_review/` | human-proofreading UI for OCR output (FastAPI + Jinja + vanilla JS, no build chain, no DB, no auth — same posture as file_manager). Loads `ocr-backend parse` bundles from an inbox dir, shows PDF page rasters (PyMuPDF, rendered to the contract's exact pixel grid) with an SVG block overlay, and records fixes as a **sparse sidecar** `review.json` keyed by (page, block id) — the machine JSON is never mutated, so the ground-truth pairing survives. `patch.apply_review` folds the overlay into a corrected `OcrDocument` on export; `patch.reanchor` re-matches entries (IoU + text ratio) after a model re-run shifts ids. Workspaces under `data/ocr_review/<sha12>/`; design doc `docs/ocr-review-ui-exploration.md` | no |
 | `src/pdf_summarizer/` | CLI: PDF → chunks → map-reduce summary | yes, via `llm_client` |
