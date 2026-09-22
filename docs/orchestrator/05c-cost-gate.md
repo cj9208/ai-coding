@@ -1,9 +1,10 @@
 # Orchestrator Scaling Sub-plan 05c — Cost Gate
 
-Status: **proposed 2026-09-22** — derived from `04-scaling.md`; one of
-four sub-plans (05a–05d). Suggested execution order: **3rd** — its
-quota step can go earlier; the rest waits for a cost model and 05a's
-service.
+Status: **executing 2026-09-22** — steps 1 (cost model) and 2 (quota
+gate) landed; the routing-row change went through as a contract
+amendment (`docs/orchestrator-design.md`, "Amendment 2026-09-22: the
+quota row"). Step 3's GO and step 4's NO-GO-for-now are the cost
+model's conclusions — see §1.
 
 **One sentence:** cut per-request LLM spend with a boolean quota gate,
 a deterministic fast path that bypasses flash interpretation, and a
@@ -36,16 +37,67 @@ pilot against script-loop abuse today.
 
 ## Design sketch
 
-### 1. Cost model first
+### 1. Cost model first — written 2026-09-22
 
-A spreadsheet, not a benchmark (`04-scaling.md`'s own words): calls
-per request by outcome path × token profile × price, at pilot / A / B
-volumes; the same table with fast-path + cache hit rates applied.
-Output: the thresholds that decide whether steps 3–4 are worth
-building, and what hit rate the cache needs to pay for itself. Until
-this exists, any "optimization" is unpriced.
+A spreadsheet, not a benchmark (`04-scaling.md`'s own words). The call
+structure is read off the shipped code (caps in `config.py`, counting in
+`runtime.py`, `rag.answer.generate`'s skip); token profiles are measured
+anchors (assembled zh prompt + injected JSON schema + output) at CJK
+≈ 1 char/token; prices are DeepSeek list price as **placeholder until a
+deployment's rate card replaces them** — the ratios, not the yuan, carry
+the decisions.
 
-### 2. `quota_context` as a boolean routing signal (§3)
+LLM calls per request by outcome path:
+
+| path | front-half | capability | total |
+| --- | --- | --- | --- |
+| safety hard stop / unsupported locale | 0 | 0 | **0** |
+| clarify-only (r3/r4) | 1 | 0 | **1** |
+| direct answer (r7→e6→v5) | 1 | 1 | **2** |
+| escalated answer (r6→r7) | 2 | 1 | **3** |
+| retry/switch en route | 1–3 | 2–3 | **3–6** |
+| worst legal walk (loops=6, escal=1, retries=2) | ≤3 | ≤3 | **≈6** |
+
+Per-call token profile (typical, zh): flash interpret ≈ 0.8k in + 0.3k
+out; answer generate ≈ 2k in (k=5 OCR chunks of 300–800 chars) + 0.5k
+out; escalation ≈ 3× flash price. At flash ¥1/¥2 per M and escalated
+¥3/¥6:
+
+| unit | ¥ |
+| --- | --- |
+| one flash interpret | ≈ 0.0014 |
+| one answer generate | ≈ 0.003 |
+| direct answer request | ≈ 0.0044 |
+| escalated answer request | ≈ 0.0087 |
+
+Volumes from `04-scaling.md` §"aggressive rungs", and the annual spend
+the two big levers would attack (mix assumption: 70% direct, 15%
+escalated, 10% clarify, 5% retry/switch):
+
+| rung | requests/day | monthly spend | front-half (flash) share |
+| --- | --- | --- | --- |
+| pilot (300) | 300 | ≈ ¥45 — quota is *abuse defense*, saving nothing here | ≈ ¥15 |
+| Case A (150k) | 100–200k | ≈ ¥20–27k | ≈ ¥6–9k (¥70–110k/yr) |
+| Case B event day (2M) | — | ≈ ¥10k **per day** | ≈ ¥3k |
+
+**Go/no-go the model outputs:**
+- **Step 3 (fast path): GO.** At Case A the per-turn flash interpret is
+  a ¥70–110k/yr line item, exactly as the trigger predicted for B; at
+  pilot it costs nothing to leave a flag-off, parity-tested fast path in
+  the repo (its build cost is one-time, the panic-time cost isn't).
+- **Step 4 (answer cache): NO-GO for now.** The big lever is answer
+  generation (≈ 68% of request spend), but its saving is
+  hit-rate × that 68% — and *nobody has ever measured the repeat rate*,
+  while the cache only pays inside a long-lived, high-volume process
+  that does not exist yet (05a built the data plane, not the host). The
+  prerequisite is already met (`corpus_version` keying survives rag
+  republishes via 05a step 5's handle fix — see `capabilities/rag.py`
+  `_get_store`); what's missing is data. Reopen when the service host
+  has run real traffic and its logs can estimate the hit rate.
+  Until then, building it is the unpriced optimization this section
+  exists to prevent.
+
+### 2. `quota_context` as a boolean routing signal (§3) — landed
 
 DP-9 shape, not a weighted score:
 
@@ -62,6 +114,45 @@ DP-9 shape, not a weighted score:
 (`docs/orchestrator-design.md`) owns the tables.** The change lands as
 a contract amendment (row, predicate, golden cases), the same
 discipline the parent demands for DP-3/DP-5 questions.
+
+**Step 2 implementation notes (landed 2026-09-22; deltas from the
+sketch above):**
+
+- **There is no `QuotaGate` wrapper class.** The sketch wanted the
+  wrapper to keep counting "in one place"; what actually owns that
+  place is `runtime.py` — a turn has exactly two points that can spend
+  a model call (`_interpret`, `_execute`), and only the runtime touches
+  the counter from either side. A wrapper around the front half and one
+  around each capability would have re-created the two homes the
+  wrapper was meant to avoid. The sketch's one-place property holds by
+  construction, and `CapabilityResult.llm_calls` keeps the *reporting*
+  with the only party that can know (DP-6 posture: the runtime adds a
+  reported number, it never infers one).
+- Quota is a **`RoutingSignals` boolean + its own row**, not a
+  `CapReached`: caps feed r2 via `any_budget_exhausted`, so a cap-shaped
+  quota would fire r2 and the audit row would blame the loop budget.
+  Position after r2, before r3 (a quota-spent user must not reach
+  clarify or escalation); the id is append-only (`route_r10`) because
+  shipped row ids are audit references (DP-7).
+- Consumption semantics pinned by goldens g18/g19: the front-half pass
+  counts **after** it happened (a refusal that short-circuited with
+  `model_name="none"` costs nothing); escalation counts each re-
+  interpretation; day-grain means the row can gate up to one call late
+  by design.
+- The day read is `Store.llm_calls_today(user, now)` — a `json_extract`
+  sum over the user's envelopes in the current **UTC** day (v1
+  simplicity; per-tenant local days belong with 05b's identity step),
+  **excluding the in-flight request** because its own spend lives on
+  the live envelope — summing both would double-count (DP-8). Backed by
+  a new `(user_id, created_at_ms)` index; old envelopes without the
+  counter return NULL and add zero.
+- **Found while wiring the goldens:** `RequestEnvelope.new(budget=...)`
+  kept the *caller's* `ExecutionBudget` object, so two live envelopes
+  from one template would have shared a mutable budget — and the
+  runtime mutates it (`wall_clock_paused_ms`). Now `.model_copy()`s it.
+  Golden cases additionally run as `golden:<case_id>` users, since the
+  suite shares one database and one case's quota spend must not leak
+  into the next case's routing.
 
 ### 3. Deterministic fast path (B.2)
 
@@ -105,24 +196,28 @@ If they diverge, the fast path is wrong, not the tables.
 
 ## Step sequence
 
-1. Cost model one-pager → go/no-go thresholds for steps 3–4.
-2. Quota context + routing row + `QuotaGate` + goldens for the
-   exhausted path (independent of 05a; can land while 05a is
-   mid-flight).
+1. ✅ Cost model one-pager → written §1; verdicts: step 3 GO, step 4
+   NO-GO pending hit-rate data.
+2. ✅ Quota context + routing row + counting + goldens (2026-09-22;
+   counting lives in the runtime, not a wrapper — see §2 notes).
 3. Fast path behind flag + parity goldens (needs step 1's numbers to
-   justify; needs nothing else).
+   justify; needs nothing else). — GO per §1
 4. Answer cache table + read-through + corpus_version keying (needs
-   05a step 5).
+   05a step 5 — landed — and measured hit rate — missing). — parked
+   per §1
 
 ## Verification
 
-- Cost model table reproduced in this doc's status header once
-  written.
-- Quota: exhausted-path golden; escalation-consumes-quota golden.
+- ✅ Cost model: the §1 tables, with prices marked placeholder until a
+  deployment's rate card replaces them.
+- ✅ Quota: exhausted-path golden (g18); escalation-consumes-quota
+  golden (g19); row-position test (r2 before r10 before r3); day-sum
+  store tests (UTC window, exclusion, legacy rows).
 - Fast path: parity suite (same fired row-ids on both paths) across
   the existing golden inputs where eligible.
-- Cache: a hit returns the identical outcome object; a republish bump
-  (corpus_version changes) → miss; cross-tenant key isolation test.
+- Cache: (parked) a hit returns the identical outcome object; a
+  republish bump (corpus_version changes) → miss; cross-tenant key
+  isolation test.
 - Suite green; the flag defaults off.
 
 ## Non-goals

@@ -98,6 +98,7 @@ execution_budget:          # first-version defaults, per request
   max_clarification_turns: 2 # unchanged
   max_model_escalations: 1 # unchanged
   max_wall_clock_ms: 30000 # 8 s → 30 s: lexical query + LLM answer generation
+  max_llm_calls_per_day: 200  # 05c quota gate — per user per UTC day, not per request
 ```
 
 These live on the request envelope, not in memory variables (DP-8), and a
@@ -266,8 +267,10 @@ record).
 One module, four tables, one interpreter. Rows carry ids so golden cases and
 coverage tests can name them ("route_r4_clarify_close_candidates").
 
-- `ROUTING_TABLE` — 9 rows, CH01 order preserved (policy/handoff hard stops
-  first; clarify before escalation; `handoff_human` as row 9 default).
+- `ROUTING_TABLE` — 10 rows, CH01 order preserved (policy/handoff hard stops
+  first; clarify before escalation; `handoff_human` as the terminal default
+  row). Row 10 (`route_r10_quota_exhausted`) is a 2026-09-22 amendment —
+  see below.
 - `EXECUTION_TABLE` — 7 rows, CH02_03.
 - `VALIDATION_TABLE` — 7 rows, CH02_03 (`accept | partial_answer | retry |
   switch_capability | clarify | reject | handoff_human | failed`).
@@ -278,6 +281,35 @@ matching row wins; the emitted `RoutingDecision.decision_reason.table_row_id`
 records the row. No table may call an LLM. Tests: for every `row_id`, at
 least one golden case must fire it (enforced by a parametrized test over the
 row registry).
+
+### Amendment 2026-09-22: the quota row (05c step 2)
+
+`route_r10_quota_exhausted` — predicate `signals.quota_exhausted`, action
+`handoff_human`, reason `daily_llm_call_quota_exhausted`. Position is
+between r2 and r3: a user out of daily calls must not reach clarify (r3/r4
+spend a later turn) or escalation (r5/r6 spend tokens now); the id stays
+append-only because row ids are audit references once shipped.
+
+Semantics fixed by this amendment:
+
+- the budget line is `execution_budget.max_llm_calls_per_day` (default 200,
+  sized by `docs/orchestrator/05c-cost-gate.md`'s cost model); consumption
+  is `attempt_counters.llm_calls` — one per front-half pass that really
+  called the model (the deterministic short-circuits report
+  `model_name="none"` and cost nothing) plus whatever a capability reports
+  via `CapabilityResult.llm_calls` (the capability is the only party that
+  knows its own spend; the runtime only adds it — DP-6 posture);
+- *today for this user* is `Store.llm_calls_today(user, now)` —
+  `json_extract` over the user's envelopes created in the current UTC day,
+  excluding the in-flight request (its counter lives on the live envelope,
+  so including both would double-count — DP-8);
+- quota is deliberately **not** a `CapReached`: caps feed r2 through
+  `any_budget_exhausted` and would swallow the quota into a misleading
+  audit row ("escalation_budget_exhausted"), and `FALLBACK_ROWS` needs no
+  new entry because the row's own action is already terminal;
+- model escalation consumes quota — g19 proves the walk r6→r10; g18 proves
+  the exhausted path. Goldens run as per-case users
+  (`golden:<case_id>`) so one case's spend cannot leak into the next.
 
 ## Control Loop
 

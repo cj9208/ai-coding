@@ -12,22 +12,22 @@ contract's per-milestone Implementation Notes are the official record of
 
 ```text
  THE CONTRACTS (one module defines what all others exchange)
- contracts.py    602   seven runtime objects + signal/value objects,
+ contracts.py    629   seven runtime objects + signal/value objects,
                        all enums; _Contract = strict pydantic base
  protocol.py      40   Capability + FrontHalf Protocols (structural, not ABC)
 
  THE HARNESS
- runtime.py      732   Orchestrator: state machine + control loop,
+ runtime.py      864   Orchestrator: state machine + control loop,
                        sole writer of current_status (_transition)
- policy.py       272   3 decision tables + fallback rows, as Row data
- assess.py       167   envelope+output -> signal objects; caps; wall clock
+ policy.py       286   3 decision tables + fallback rows, as Row data
+ assess.py       180   envelope+output -> signal objects; caps; wall clock
  registry.py     148   Registry + load_yaml / load_default / load_static
- store.py        235   3-table SQLite persistence (via src/storage)
+ store.py        384   3-table SQLite persistence (via src/storage)
  ids.py           28   Crockford base32 ms+random ids, lexicographically
                        time-sortable
 
  THE FRONT HALF (M1)
- interpret.py    217   LlmFrontHalf: gate -> normalize -> flash chat_json,
+ interpret.py    226   LlmFrontHalf: gate -> normalize -> flash chat_json,
                        all three assets selected by the caller's locale pack
  safety.py       ~85   SafetyRow/Verdict shapes + first-match + locale-aware
                        evaluate (late pack lookup; no silent allow on miss)
@@ -36,18 +36,18 @@ contract's per-milestone Implementation Notes are the official record of
                        en.py (first tranche, IGNORECASE rows, no aliases yet)
  normalize.py    103   specificity scoring, traceable rule hits
                        (default ALIASES now come from the zh pack)
- config.py        47   Budget / Thresholds / Models defaults, env overrides
+ config.py        65   Budget / Thresholds / Models defaults, env overrides
 
  THE CAPABILITIES (M2/M3)
- capabilities/rag.py     154   RagQueryCapability over src/rag store
- capabilities/lookup.py  153   StructuredLookupCapability over
+ capabilities/rag.py     188   RagQueryCapability over src/rag store
+ capabilities/lookup.py  155   StructuredLookupCapability over
                                file_manager metadata search
  capabilities/builtin.py 130   handoff packet + six-section markdown export
  capabilities/fake.py    117   EchoCapability + FakeFrontHalf (M0 world)
 
  THE REGRESSION SURFACE
- golden.py       209   case loader + scripted replay + decision diff
- cli.py          228   orchestrate: ask/status/replay/handoff/golden/registry
+ golden.py       215   case loader + scripted replay + decision diff
+ cli.py          235   orchestrate: ask/status/replay/handoff/golden/registry
 ```
 
 Imports are one-directional: `cli` → `runtime`/`registry`/`interpret` →
@@ -91,9 +91,11 @@ that the tables alone cannot state — they are the M3 notes condensed:
 `policy.py` — all row ids listed so tests and docs can enumerate them
 (the coverage invariant: ≥ 1 golden case fires each row).
 
-- **ROUTING_TABLE** r1..r9: reject(policy) → handoff(budget) →
-  clarify(missing constraint) → clarify(ambiguity) → stronger_model ×2 →
-  proceed → proceed_conservative → handoff(default).
+- **ROUTING_TABLE** r1..r10: reject(policy) → handoff(budget) →
+  handoff(quota, 05c r10) → clarify(missing constraint) → clarify(ambiguity)
+  → stronger_model ×2 → proceed → proceed_conservative →
+  handoff(default r9; r10's id extends the numbering, its position is
+  between r2 and r3 — audit ids are append-only).
 - **EXECUTION_TABLE** e1..e7: reject(denied) → handoff(retries spent, no
   alternate) → retry(transient) → switch(weak + alternate) → clarify(user
   constraint) → accept(grounded, hands off to validation) → handoff(default).
@@ -112,6 +114,7 @@ that the tables alone cannot state — they are the M3 notes condensed:
 | `Budget.MAX_TOOL_CALLS` | 6 | rag chains retrieve→answer; widened 4→6 |
 | `Budget.MAX_REINTERPRETATIONS` / `_CLARIFICATION_TURNS` / `_MODEL_ESCALATIONS` / `_EXECUTION_RETRIES` | 2 / 2 / 1 / 2 | unchanged from the notes |
 | `Budget.MAX_WALL_CLOCK_MS` | 30 000 | machine time only (see pause rule) |
+| `Budget.LLM_CALLS_PER_DAY` | 200 | 05c quota: per-user per-UTC-day LLM-call allowance; the budget field copies it per envelope, `Store.llm_calls_today` sums the day |
 | `Thresholds.GROUNDING_COVERAGE_MIN` | 0.5 | below this, v3 fires before v6 |
 | `Thresholds.CONSERVATIVE_TOPK_FACTOR` | 1.5 | the entire DP-10 ladder |
 | `Models.FLASH` / `Models.ESCALATED` | env-overridable renames | `ORCHESTRATOR_FLASH_MODEL` / `ORCHESTRATOR_STRONG_MODEL`; empty ⇒ llm_client default |

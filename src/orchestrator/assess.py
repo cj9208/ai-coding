@@ -124,10 +124,22 @@ def retry_budget_left(envelope: RequestEnvelope) -> bool:
     return c.execution_retries < b.max_execution_retries
 
 
+def quota_exhausted(envelope: RequestEnvelope, other_calls_today: int) -> bool:
+    """05c: is the user's daily LLM-call allowance spent? Pure over the
+    envelope plus the one cross-request fact the runtime reads from the
+    store (this user's calls today in *other* requests) — the current
+    request's own counter is the envelope's, so the sum never double-counts
+    (DP-8). Boolean by construction (DP-9): a level comparison, no score."""
+    consumed = envelope.attempt_counters.llm_calls + other_calls_today
+    return consumed >= envelope.execution_budget.max_llm_calls_per_day
+
+
 def routing_signals(
     envelope: RequestEnvelope,
     out: FrontHalfOutput,
     caps: list[CapReached],
+    *,
+    quota_exhausted: bool = False,
 ) -> tuple[ConfidenceAssessment, RoutingSignals]:
     """The single place RoutingSignals is built, so tests and runtime can
     never drift on how the table inputs are derived."""
@@ -156,6 +168,7 @@ def routing_signals(
         user_resolvable_ambiguity=out.user_resolvable_ambiguity,
         strong_evidence=strong_evidence,
         any_budget_exhausted=CapReached.total_loop_cap in caps,
+        quota_exhausted=quota_exhausted,
         model_escalation_budget_left=model_escalation_budget_left(envelope),
         aggregate_score=assessment.aggregate_score,
     )

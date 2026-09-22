@@ -71,7 +71,11 @@ ask it questions; the contract first if you intend to *change* behavior;
   (`test_adversarial.py` — two real holes fixed: resume answers are now
   gated, gate constraints can no longer be revoked by a proposal) and
   the **gateway deployment contract** in `03-usage.md`. Remaining 05b
-  steps (identity, idempotency) and 05c–05d await their triggers.
+  steps (identity, idempotency) await the service host; **05c steps 1–2
+  landed** — cost model written (`05c-cost-gate.md` §1, with the step-3
+  GO / step-4 NO-GO verdicts) and the per-user daily LLM-call quota gate
+  enforcing it via routing row r10, added through a contract
+  amendment. 05d awaits its triggers.
   04 carries a **problem status ledger** — read it first for
   per-problem state.
 

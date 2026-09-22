@@ -36,6 +36,12 @@ class Budget:
     MAX_CLARIFICATION_TURNS = 2
     MAX_MODEL_ESCALATIONS = 1
     MAX_WALL_CLOCK_MS = 30_000  # 8000 -> 30000: lexical query + LLM answer
+    #: 05c quota gate: per-user daily LLM-call allowance, day-grain. Sized
+    #: by ``docs/orchestrator/05c-cost-gate.md``'s cost model: the worst
+    #: legal path spends ~5 calls/request, so 200 ≈ 40 answered requests a
+    #: day — generous for a pilot human, a real ceiling against a looping
+    #: script. Per-tenant values arrive with 05b's identity step.
+    LLM_CALLS_PER_DAY = 200
 
 
 class Thresholds:

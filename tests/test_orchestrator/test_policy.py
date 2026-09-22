@@ -20,6 +20,7 @@ from orchestrator.contracts import (
 ROUTING_FIRINGS: dict[str, RoutingSignals] = {
     "route_r1_reject_policy": RoutingSignals(policy_violation=True),
     "route_r2_handoff_budget": RoutingSignals(any_budget_exhausted=True),
+    "route_r10_quota_exhausted": RoutingSignals(quota_exhausted=True),
     "route_r3_clarify_missing_constraint": RoutingSignals(
         missing_required_constraint=True
     ),
@@ -94,6 +95,15 @@ def test_row_order_is_hard_constraint_first() -> None:
     assert ids[-1] == "route_r9_handoff_default"
 
 
+def test_quota_row_sits_behind_loop_cap_ahead_of_every_spend_row() -> None:
+    # a request that overspent its loops is the more local failure (r2);
+    # a user out of daily calls must not reach clarify or escalate (r3+)
+    both = RoutingSignals(any_budget_exhausted=True, quota_exhausted=True)
+    assert policy.ROUTING_TABLE.decide(both).row_id == "route_r2_handoff_budget"
+    ahead = RoutingSignals(quota_exhausted=True, missing_required_constraint=True)
+    assert policy.ROUTING_TABLE.decide(ahead).row_id == "route_r10_quota_exhausted"
+
+
 def test_safety_refuse_blocks_even_with_strong_evidence() -> None:
     signals = RoutingSignals(
         safety=SafetyDecision.refuse,
@@ -110,7 +120,7 @@ def test_write_action_needs_clear_confidence() -> None:
         confidence_state=ConfidenceState.clear,
     )
     # strong + clear => r7 proceed (write-specific gating is the execution
-    # policy check's job, CH02_03; the routing table stays 9 rows)
+    # policy check's job, CH02_03; the routing table stays 10 rows)
     assert policy.ROUTING_TABLE.decide(signals).action == Decision.proceed
 
 

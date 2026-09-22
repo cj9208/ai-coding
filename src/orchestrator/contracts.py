@@ -125,6 +125,11 @@ class ExecutionBudget(_Contract):
     max_clarification_turns: int = Budget.MAX_CLARIFICATION_TURNS
     max_model_escalations: int = Budget.MAX_MODEL_ESCALATIONS
     max_wall_clock_ms: int = Budget.MAX_WALL_CLOCK_MS
+    #: 05c quota gate: per-user *daily* allowance of LLM calls, day-grain
+    #: (UTC calendar day in v1). Not a loop cap — it is compared against
+    #: today's consumed calls across the user's requests, and it has its
+    #: own routing row (route_r10), deliberately not a CapReached line.
+    max_llm_calls_per_day: int = Budget.LLM_CALLS_PER_DAY
     #: time the request spent parked in ``awaiting_clarification`` across
     #: process boundaries; DP-4's wall clock budgets machine work, not the
     #: human's answer latency, so it is subtracted at every wait->resume edge
@@ -141,6 +146,10 @@ class AttemptCounters(_Contract):
     clarification_turns: int = 0
     model_escalations: int = 0
     tool_calls: int = 0
+    #: LLM calls consumed by *this* request (front-half model passes +
+    #: capability-reported calls). Summed across the user's requests for
+    #: the day by ``Store.llm_calls_today`` (05c quota gate).
+    llm_calls: int = 0
 
 
 class OriginalInput(_Contract):
@@ -212,7 +221,10 @@ class RequestEnvelope(_Contract):
             timestamp_start_ms=int(time.time() * 1000),
             original_input=OriginalInput(text=text, locale=locale),
             policy_context=policy_context or PolicyContext(),
-            execution_budget=budget or ExecutionBudget(),
+            # own copy: the runtime mutates the budget (wall-clock pause),
+            # so a caller-reused template must never be aliased by two live
+            # envelopes (DP-8: per-request state is per-request)
+            execution_budget=budget.model_copy() if budget else ExecutionBudget(),
         )
 
 
@@ -465,6 +477,10 @@ class CapabilityResult(_Contract):
     evidence_refs: list[str] = Field(default_factory=list)
     confidence_signals: dict[str, float] = Field(default_factory=dict)
     tool_steps: list[str] = Field(default_factory=list)
+    #: how many LLM calls this run consumed — the capability reports it
+    #: (it is the only party that knows), the runtime adds it to the
+    #: envelope's ``llm_calls``; it never decides anything itself (05c)
+    llm_calls: int = 0
 
 
 # --------------------------------------------------------------------------
@@ -552,6 +568,10 @@ class RoutingSignals(_Contract):
     user_resolvable_ambiguity: bool = False
     strong_evidence: bool = False
     any_budget_exhausted: bool = False
+    #: 05c quota gate: today's consumed LLM calls for this user are at or
+    #: over ``max_llm_calls_per_day`` (boolean per DP-9 — a level, never a
+    #: weighted score; the row reads this, never the raw counts)
+    quota_exhausted: bool = False
     model_escalation_budget_left: bool = True
     aggregate_score: float = 0.0  # carried for the record, never a condition
 

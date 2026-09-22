@@ -53,7 +53,7 @@ class DecisionTable(Generic[S]):
         return [r.row_id for r in self.rows]
 
 
-# --- routing table (CH01, 9 rows) -----------------------------------------
+# --- routing table (CH01 9 rows + the 05c quota row) -----------------------
 ROUTING_TABLE: DecisionTable[RoutingSignals] = DecisionTable(
     "routing",
     [
@@ -68,6 +68,20 @@ ROUTING_TABLE: DecisionTable[RoutingSignals] = DecisionTable(
             lambda s: s.any_budget_exhausted,
             Decision.handoff_human,
             "escalation_budget_exhausted",
+        ),
+        Row(
+            # 05c quota gate. The id extends the numbering but the *position*
+            # is deliberate: after the per-request loop cap (r2, which is
+            # about this request misbehaving) and before every spend-more-
+            # money row — a user out of daily calls must not reach clarify
+            # (r3/r4 cost a later turn) or escalation (r5/r6 cost tokens
+            # now). Quota is its own boolean signal, not a CapReached: a cap
+            # would be swallowed by r2's any_budget_exhausted and the audit
+            # row would say "escalation_budget_exhausted", not "quota".
+            "route_r10_quota_exhausted",
+            lambda s: s.quota_exhausted,
+            Decision.handoff_human,
+            "daily_llm_call_quota_exhausted",
         ),
         Row(
             "route_r3_clarify_missing_constraint",

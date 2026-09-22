@@ -311,6 +311,13 @@ class Orchestrator:
         out = await self.front_half.interpret(
             envelope, answer=turn.pending_answer, escalated=turn.escalated
         )
+        # quota accounting (05c): a front-half pass that really called the
+        # model costs one call; the deterministic short-circuits (safety
+        # hard stop, unsupported locale) report model_name="none" and cost
+        # nothing. The counter increments before the commit below, so the
+        # persisted envelope is never behind the in-memory one (DP-8).
+        if out.interpretation.model.model_name != "none":
+            envelope.attempt_counters.llm_calls += 1
         turn.pending_answer = None
         turn.escalated = False
         turn.out = out
@@ -333,7 +340,19 @@ class Orchestrator:
         # control-loop step 2: this pass consumes one loop
         envelope.attempt_counters.total_loops += 1
         caps = assess.caps_reached(envelope, now)
-        assessment, signals = assess.routing_signals(envelope, turn.out, caps)
+        # 05c quota gate: this user's calls today in *other* requests come
+        # from the store (inside the pass transaction, so the read sees this
+        # request's own persisted transitions — which the exclude drops
+        # anyway); this request's own spend stays on the envelope (DP-8).
+        other_calls_today = self.store.llm_calls_today(
+            envelope.user_id, now, exclude_request_id=envelope.request_id
+        )
+        assessment, signals = assess.routing_signals(
+            envelope,
+            turn.out,
+            caps,
+            quota_exhausted=assess.quota_exhausted(envelope, other_calls_today),
+        )
 
         row = policy.ROUTING_TABLE.decide(signals)
         decision, row_id = row.action, row.row_id
@@ -428,7 +447,7 @@ class Orchestrator:
             return None
         if decision == Decision.reject:
             return self._finish_rejected(envelope, turn, rd.decision_reason.primary)
-        # handoff_human (r2 / r9 / fallback override)
+        # handoff_human (r2 / r10 / r9 / fallback override)
         return self._finish_handoff(envelope, turn, rd.decision_reason.primary)
 
     async def _execute(self, envelope: RequestEnvelope, turn: _Turn) -> None:
@@ -486,6 +505,9 @@ class Orchestrator:
         )
         turn.last_result = result
         envelope.attempt_counters.tool_calls += len(result.tool_steps)
+        # the capability reports its own LLM spend (05c) — it is the only
+        # party that knows; counting stays in this one place (DP-6 posture)
+        envelope.attempt_counters.llm_calls += result.llm_calls
         with self.store.transact():
             self._append(envelope, "execution", rec, end)
             self.store.emit(

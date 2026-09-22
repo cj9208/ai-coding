@@ -3,7 +3,7 @@ across process boundaries, the wall clock, the transition guard, handoff
 packet content, and conservative-mode constraint propagation (DP-10)."""
 
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Any, Callable, Iterator
 
 import pytest
 
@@ -16,6 +16,7 @@ from orchestrator.contracts import (
     HandoffPacket,
     OutcomeType,
     OutputContract,
+    RequestEnvelope,
     RequestStatus,
 )
 from orchestrator.registry import HUMAN_HANDOFF, Registry
@@ -81,7 +82,7 @@ class TestTurnFlow:
         env = store.get_request(first.request_id)
         assert env is not None
         assert env.attempt_counters == AttemptCounters(
-            total_loops=2, clarification_turns=1, tool_calls=1
+            total_loops=2, clarification_turns=1, tool_calls=1, llm_calls=2
         )
 
     def test_a_request_resumed_elsewhere_cannot_be_resumed_again(
@@ -191,8 +192,10 @@ class TestTurnFlow:
         env = store.get_request(first.request_id)
         assert env is not None
         assert env.attempt_counters == AttemptCounters(
-            total_loops=1, clarification_turns=1, tool_calls=1
+            total_loops=1, clarification_turns=1, tool_calls=1, llm_calls=1
         )
+        # the reset really did drop the pre-expiry call: the envelope kept
+        # only the resumed pass (the old day's spend is another day's books)
         events = [e["event"] for e in store.events(first.request_id)]
         assert "clarification_expired" in events
 
@@ -281,3 +284,65 @@ def test_transition_table_terminals_have_no_exits() -> None:
         RequestStatus.failed,
     ):
         assert LEGAL_TRANSITIONS[terminal] == frozenset()
+
+
+class TestQuotaGate:
+    """05c: the per-user daily LLM-call quota — counted on the envelope,
+    summed across the user's requests via the store, decided by routing row
+    ``route_r10_quota_exhausted`` (a boolean signal, not a CapReached)."""
+
+    def test_quota_spans_all_of_one_users_requests(self, store: Store) -> None:
+        orch = Orchestrator(store, make_registry(), FakeFrontHalf([STRONG]))
+        budget = ExecutionBudget(max_llm_calls_per_day=3)
+        for _ in range(2):
+            done = orch.run_turn("怎么续费套餐", user_id="u1", budget=budget)
+            assert done.status is RequestStatus.completed
+        third = orch.run_turn("怎么续费套餐", user_id="u1", budget=budget)
+        assert third.status is RequestStatus.handoff
+        rows = [
+            o["payload"]["decision_reason"]["table_row_id"]
+            for o in store.objects(third.request_id)
+            if o["kind"] == "routing"
+        ]
+        assert rows == ["route_r10_quota_exhausted"]
+
+    def test_quota_is_scoped_to_the_user_not_the_process(self, store: Store) -> None:
+        orch = Orchestrator(store, make_registry(), FakeFrontHalf([STRONG]))
+        budget = ExecutionBudget(max_llm_calls_per_day=2)
+        done = orch.run_turn("q", user_id="u1", budget=budget)
+        assert done.status is RequestStatus.completed  # 1 of 2 spent
+        spent = orch.run_turn("q", user_id="u1", budget=budget)
+        assert spent.status is RequestStatus.handoff  # 2 of 2 -> gated
+        other = orch.run_turn("q", user_id="u2", budget=budget)
+        assert other.status is RequestStatus.completed  # u2 untouched
+
+    def test_capability_reported_calls_reach_the_envelope(self, store: Store) -> None:
+        from orchestrator.contracts import CapabilityResult, ResultStatus
+
+        class _CostlyEcho(EchoCapability):
+            async def run(self, ctx: Any) -> CapabilityResult:
+                self.contexts.append(ctx)
+                return CapabilityResult(
+                    status=ResultStatus.success,
+                    output={"text": "generated"},
+                    tool_steps=["echo.run"],
+                    llm_calls=1,  # the only party that knows it spent one
+                )
+
+        orch = Orchestrator(
+            store, make_registry(_CostlyEcho()), FakeFrontHalf([STRONG])
+        )
+        done = orch.run_turn("q", user_id="u1", budget=ExecutionBudget())
+        env = store.get_request(done.request_id)
+        assert env is not None
+        # 1 front-half pass + 1 capability-reported call
+        assert env.attempt_counters.llm_calls == 2
+
+    def test_a_reused_budget_template_is_never_aliased(self, store: Store) -> None:
+        """DP-8: the runtime mutates the budget (wall-clock pause), so two
+        live envelopes must not share one ExecutionBudget object."""
+        budget = ExecutionBudget(max_llm_calls_per_day=100)
+        a = RequestEnvelope.new(text="q", budget=budget)
+        b = RequestEnvelope.new(text="q", budget=budget)
+        a.execution_budget.wall_clock_paused_ms = 500
+        assert b.execution_budget.wall_clock_paused_ms == 0

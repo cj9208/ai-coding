@@ -100,6 +100,10 @@ class RagQueryCapability:
     def _translate(self, answer: Answer, pack: EvidencePack) -> CapabilityResult:
         coverage = _coverage(answer)
         signals = {"grounding_coverage": coverage}
+        # one model call per generate — except the empty/insufficient-evidence
+        # path, which `rag.answer.generate` returns before touching the model
+        # (same guard); the adapter reports its real spend (05c quota)
+        llm_calls = 0 if pack.insufficient or not pack.chunks else 1
         tool_steps = [
             f"rag.retrieve(k={len(pack.chunks)})",
             f"rag.{answer.outcome.value}",
@@ -116,6 +120,7 @@ class RagQueryCapability:
                 },
                 confidence_signals=signals,
                 tool_steps=tool_steps,
+                llm_calls=llm_calls,
             )
         if answer.outcome in (Outcome.insufficient, Outcome.escalated):
             return CapabilityResult(
@@ -128,6 +133,7 @@ class RagQueryCapability:
                 evidence_refs=evidence,
                 confidence_signals=signals,
                 tool_steps=tool_steps,
+                llm_calls=llm_calls,
             )
         output: dict[str, Any] = {
             "answer_markdown": answer.text,
@@ -143,6 +149,7 @@ class RagQueryCapability:
             evidence_refs=evidence,
             confidence_signals=signals,
             tool_steps=tool_steps,
+            llm_calls=llm_calls,
         )
 
 

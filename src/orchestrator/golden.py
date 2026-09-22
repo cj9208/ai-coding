@@ -97,7 +97,13 @@ def run_case(case: GoldenCase, db_path: str | Path) -> GoldenResult:
     try:
         orch = Orchestrator(store, registry_for(case), FakeFrontHalf(case.turns))
         budget = ExecutionBudget(**case.budget) if case.budget else None
-        result = orch.run_turn(case.input, budget=budget)
+        # each case runs as its own user: the daily quota (05c) sums calls
+        # across a user's requests, and every case here shares one database
+        # — without isolation one case's spend would leak into the next
+        # case's routing decisions
+        result = orch.run_turn(
+            case.input, user_id=f"golden:{case.case_id}", budget=budget
+        )
         for answer in case.resume:
             if result.status != RequestStatus.awaiting_clarification:
                 break

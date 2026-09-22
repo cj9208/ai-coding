@@ -57,7 +57,15 @@ CREATE INDEX IF NOT EXISTS ix_events_request ON events (request_id, id);
 -- these existed (measured: list_requests P50 188 ms at 10^5 requests)
 CREATE INDEX IF NOT EXISTS ix_requests_updated ON requests (updated_at_ms);
 CREATE INDEX IF NOT EXISTS ix_objects_kind ON runtime_objects (kind, created_at_ms);
+-- the quota gate's day read — this user's requests in one day window,
+-- envelopes summed via json_extract (05c). Day-grain, so the window scan
+-- is tiny and the index keeps it that way at Case A row counts
+CREATE INDEX IF NOT EXISTS ix_requests_user_created ON requests (user_id, created_at_ms);
 """
+
+#: day bucket for the quota gate (05c): UTC calendar day — deliberate v1
+#: simplicity; per-tenant local days belong with 05b's identity step.
+DAY_MS = 86_400_000
 
 
 class ConflictError(RuntimeError):
@@ -221,6 +229,35 @@ class Store:
             {"request_id": r[0], "status": r[1], "user_id": r[2], "updated_at_ms": r[3]}
             for r in rows
         ]
+
+    def llm_calls_today(
+        self, user_id: str, now_ms: int, *, exclude_request_id: str | None = None
+    ) -> int:
+        """Sum of ``attempt_counters.llm_calls`` over this user's requests
+        created in the current UTC day (05c quota gate). The envelope is
+        the accounting authority (DP-8), so the sum reads the JSON projection
+        with json_extract — rows written before the field existed return
+        NULL and simply do not add. ``exclude_request_id`` drops the
+        in-flight request, whose own counter the caller carries on the
+        live envelope — including both would double-count."""
+        day_start = now_ms - (now_ms % DAY_MS)
+        sql = (
+            "SELECT COALESCE(SUM("
+            " json_extract(envelope_json, '$.attempt_counters.llm_calls')), 0)"
+            " FROM requests"
+            " WHERE user_id = :uid AND created_at_ms >= :start"
+            " AND created_at_ms < :end"
+        )
+        params: dict[str, Any] = {
+            "uid": user_id,
+            "start": day_start,
+            "end": day_start + DAY_MS,
+        }
+        if exclude_request_id is not None:
+            sql += " AND request_id != :rid"
+            params["rid"] = exclude_request_id
+        with self._read() as conn:
+            return int(conn.execute(text(sql), params).scalar_one())
 
     # --- runtime objects -----------------------------------------------------
     def append_object(

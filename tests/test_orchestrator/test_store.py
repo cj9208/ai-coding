@@ -1,5 +1,6 @@
 """Store: three-table persistence, append-only ordering, envelope as root."""
 
+import json
 from pathlib import Path
 from typing import Iterator
 
@@ -154,3 +155,57 @@ def test_unknown_json_fields_are_ignored_on_load(store: Store) -> None:
     raw["future_field"] = 42
     loaded = RequestEnvelope.model_validate(raw)
     assert loaded.original_input.text == "q"
+
+
+def _seed(
+    store: Store, user_id: str, created_at_ms: int, calls: int
+) -> RequestEnvelope:
+    env = RequestEnvelope.new(text="q", user_id=user_id)
+    env.timestamp_start_ms = created_at_ms
+    env.attempt_counters.llm_calls = calls
+    store.create_request(env)
+    return env
+
+
+def test_llm_calls_today_sums_the_users_utc_day(store: Store) -> None:
+    from orchestrator.store import DAY_MS
+
+    now = 1_758_000_000_000  # any ms instant inside a day
+    day_start = now - (now % DAY_MS)
+    _seed(store, "u1", day_start + 1_000, 2)  # early today
+    _seed(store, "u1", now, 3)  # later today
+    _seed(store, "u1", day_start - 1, 9)  # last day's last ms
+    _seed(store, "u2", now, 100)  # another user
+    assert store.llm_calls_today("u1", now) == 5
+    assert store.llm_calls_today("u2", now) == 100
+    # next day: today's rows fall out of the window
+    assert store.llm_calls_today("u1", day_start + DAY_MS) == 0
+
+
+def test_llm_calls_today_can_exclude_the_in_flight_request(store: Store) -> None:
+    now = 1_758_000_000_000
+    mine = _seed(store, "u1", now, 4)
+    _seed(store, "u1", now, 3)
+    assert store.llm_calls_today("u1", now) == 7
+    assert store.llm_calls_today("u1", now, exclude_request_id=mine.request_id) == 3
+
+
+def test_llm_calls_today_reads_legacy_envelopes_as_zero(store: Store) -> None:
+    """Rows written before the counter existed return NULL from
+    json_extract and simply do not add."""
+    from sqlalchemy import text
+
+    now = 1_758_000_000_000
+    env = _seed(store, "u1", now, 2)
+    legacy = RequestEnvelope.new(text="q", user_id="u1")
+    legacy.timestamp_start_ms = now
+    raw = legacy.model_dump()
+    del raw["attempt_counters"]["llm_calls"]
+    store.create_request(legacy)
+    with store._client.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE requests SET envelope_json = :j WHERE request_id = :r"),
+            {"j": json.dumps(raw), "r": legacy.request_id},
+        )
+    assert store.llm_calls_today("u1", now) == 2
+    assert store.llm_calls_today("u1", now, exclude_request_id=env.request_id) == 0

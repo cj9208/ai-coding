@@ -160,3 +160,24 @@ class TestRoutingSignals:
         assessment, signals = assess.routing_signals(env, out, [])
         assert assessment.aggregate_score > 0  # calibration record
         assert signals.aggregate_score == assessment.aggregate_score
+
+
+class TestQuota:
+    """05c: the quota signal is a level comparison over the envelope plus
+    the one cross-request fact the runtime reads from the store."""
+
+    def test_consumed_is_envelope_plus_other_requests_today(self) -> None:
+        env = RequestEnvelope.new(
+            text="q", budget=ExecutionBudget(max_llm_calls_per_day=5)
+        )
+        env.attempt_counters.llm_calls = 2
+        assert not assess.quota_exhausted(env, 2)
+        assert assess.quota_exhausted(env, 3)  # 2 + 3 == 5 -> at the ceiling
+
+    def test_routing_signals_carries_the_flag_and_defaults_false(self) -> None:
+        env = RequestEnvelope.new(text="q")
+        out = _out(_interp())
+        _, signals = assess.routing_signals(env, out, [])
+        assert not signals.quota_exhausted
+        _, signals = assess.routing_signals(env, out, [], quota_exhausted=True)
+        assert signals.quota_exhausted

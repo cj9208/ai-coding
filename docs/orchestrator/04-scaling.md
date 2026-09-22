@@ -59,7 +59,7 @@ only prose here.
 | --- | --- | --- |
 | §1 deployment shape | **fixed (embeddability) — the host is still open** — `interpret`/`Capability.run` are coroutines, `run_turn_async`/`resume_async` await inside a running loop (pinned by `test_async_surface.py`), sync shims keep CLI/golden/bench unchanged | 05a step 5; what queues behind it is the *service host itself* (gateway, queue worker) — 05b lands identity on it, B.4/B.6 live there |
 | §2 write path | **fixed & measured** — explicit `busy_timeout`, per-pass batching (~20→8 commits/turn), `requests.version` CAS, seq on envelope; throughput 45→137 turns/s at 16 writers | 05a steps 2–3; residual: `resume()` still doesn't verify `user_id` — 05b (lost-update hazard already closed by CAS, so this is attribution not integrity) |
-| §3 cost/quota | **open, priority raised** — step 4's verdict names LLM quota (with §1) as the *actual* binding constraint once writes are batched | 05c |
+| §3 cost/quota | **fixed (quota gate)** — per-user daily LLM-call allowance enforced by routing row r10 via a contract amendment; cost model written (05c §1) with the step-3 GO / step-4 NO-GO verdicts | 05c steps 1–2 (2026-09-22); the per-*money* (token) ledger and per-tenant allowances ride on the service host |
 | §4 tenancy/identity | **open** — tenant column still absent, `handoff list` still returns every user's packets | 05b |
 | §5a clarification never expires | **fixed** — 7-day TTL, resume-past-TTL forces clean re-interpret, `clarification_expired` event keeps it auditable | 05a step 2 |
 | §5b handoff black hole | **open** — no worklist, no recovery edge (DP-3 conversation) | 05d |
@@ -92,8 +92,10 @@ Two readings the ledger forces:
   problem is walked in order.
 - **With 05a complete, the open list is one gate and three rooms.**
   The gate is the service host itself — embeddability landed (step 5),
-  but nothing hosts the harness yet, and §3/§4/§6c/B.3/B.4/B.6 all
-  read "after the host" on their owner line. Behind it sit the trust
+  but nothing hosts the harness yet, and §4/§6c/B.3/B.4/B.6 all
+  read "after the host" on their owner line (§3's quota gate went
+  ahead of the host — it defends the pilot's wallet from a script
+  today). Behind it sit the trust
   (05b), cost (05c) and governance (05d) rooms, whose triggers are
   calendar/legal, not technical. The storage engine is in no room:
   measured, batched, and closed as "won't trigger" for Postgres.
@@ -201,6 +203,15 @@ envelope (per-user daily LLM-call or token allowance) consumed by the
 routing table as a **boolean state** (`quota_exhausted → handoff/reject
 row`), not a weighted score — and the escalation counts as consumed
 quota, so fallback walks stay legal without new branches.
+
+*Fixed 2026-09-22 (05c step 2): `max_llm_calls_per_day` (default 200)
+on the budget, `attempt_counters.llm_calls` counted in the runtime at
+its two spend points (front-half pass, capability-reported
+`CapabilityResult.llm_calls`), day sum via
+`Store.llm_calls_today` (UTC day, in-flight request excluded), and the
+routing row `route_r10_quota_exhausted` — landed through a contract
+amendment in `docs/orchestrator-design.md`. Goldens g18/g19 pin the
+exhausted path and escalation-consumes-quota.*
 
 ### 4. Multi-tenancy and identity: the fields exist, the semantics do not
 
