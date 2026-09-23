@@ -1,0 +1,25 @@
+# 期望心跳规则 —— docs/notify-design.md §4.5 的数据面。
+# 改这个文件就是改告警规则，和改代码同权重，所以它进 git、注释写明理由。
+#
+# 一条规则声明：project.kind 应当至少每 max_silence 出现一次；静默超过它，
+# 由 `notify dispatch` 自己 emit 一条 alert 入账再投递——任务不需要报告自己
+# 静默，静默本身就是报告（quantdesk silence-is-a-gap 的通用层化）。
+#
+# 字段：
+#   project / kind   对账本 (project, kind) 的最近事件时间做判据
+#   max_silence      时长，数字 + s/m/h/d，如 45m、3h、2d
+#   message          随 alert 一起入账的文案（渲染用，不参与判定）
+#   severity         默认 alert；warn 也可
+#   dedup_key        默认 <project>:<kind>:silent，一般不用改
+#   enabled          默认 true；false 时整条规则跳过
+#
+# 注意：开启一条规则后，"账本里从没见过这个 kind" 同样算静默并立刻告警——
+# 没有证据即未达成，而不是让规则礼貌地等。因此顺序永远是先接线、再开启。
+expectations:
+  - project: quantdesk
+    kind: record.batch
+    max_silence: 3h
+    message: "quant record 停止写批次：数据流静默（gap 见 notify status --project quantdesk）"
+    # recorder 还没挂上计划任务（docs/notify-design.md §4.8 属 M2），
+    # 现在开启只会在手机上循环收到一条真话："它确实没在跑"。
+    enabled: false

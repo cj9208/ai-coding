@@ -61,11 +61,16 @@ the four remaining questions are recorded as resolved-as-deferred in
       notify's contract assumes `dispatch` is launched by a scheduler (never a
       daemon), and quant record / ai-market-radar scan are background-shaped,
       but no Windows Task Scheduler task has ever been registered — every run
-      so far was human-launched. First owner: the notify M1 wrap-up — register
-      one real `notify dispatch` task (hourly) on this machine and prove the
-      ledger fills while nobody watches; the same recipe then extends to
-      `quant record`. Until then the "silence is detected" chain (L2/L3 of
-      `docs/notify-design.md`) has never seen a real unattended cycle.
+      so far was human-launched. The recipe is now written
+      (`docs/notify-design.md` §4.9; PowerShell `Register-ScheduledTask`, since
+      `schtasks /create` has no working-directory flag and `uv` needs the repo
+      root). Two things still owed, in this order: register one
+      `notify dispatch` task and prove the ledger fills while nobody watches,
+      then close the laptop lid for 20 minutes and confirm
+      `data/notify/dispatch.log` shows `StartWhenAvailable` replaying the
+      missed rounds. Until then the "silence is detected" chain (L2/L3 of
+      `docs/notify-design.md`) has never seen a real unattended cycle, and the
+      same recipe extends to `quant record` afterwards.
 - [ ] **ocr-review: one real mouse drag-to-add-block in a visible browser
       window.** Everything else (pixel alignment, corrected/rejected/added
       blocks, save/409, export) was verified end-to-end, but the headless
@@ -94,11 +99,6 @@ the four remaining questions are recorded as resolved-as-deferred in
       (`burst_id`) ships as constant None until a real Apple BurstIdentifier is
       confirmed readable, so on-device bursts currently lean on the
       EXIF-millisecond rule — verify it actually fires on iPhone bursts.
-- [ ] **notify M1: one real Telegram delivery.** Needs `@BotFather` token +
-      own `chat_id` + a working `TELEGRAM_PROXY` in `.env`; then follow
-      `docs/notify-design.md` §5 M1 (alert in ~1 min on the phone, silence
-      alert from a faked 3h gap, throttle 5→2, unplug-proxy retry path).
-      policy.py / rules.py / expectations.yaml are M1 work, not owed yet.
 
 ## Next, if the demand is real
 
