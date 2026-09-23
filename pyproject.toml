@@ -113,6 +113,8 @@ plugins = ["pydantic.mypy"]
 module = [
     "paddleocr.*",
     "paddlex.*",
+    "paddle",
+    "huggingface_hub",
     "fitz",
     "pandas.*",
     "openpyxl.*",
