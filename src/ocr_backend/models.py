@@ -1,18 +1,20 @@
-"""Local model snapshots — one directory per model, under ``data/``.
+"""Local model snapshots — one directory per model, under ``cache/``.
 
 Downloaded weights are bulk data, not code: the repo keeps them in
-``data/ocr_backend/models/<name>/`` — gitignored and root-anchored like every
-other default data path (``utils.paths``). One store keeps the repo root clean
-as more engines arrive, and adapters resolve their default snapshot through
-:func:`model_dir` instead of consumers hard-coding a location. Provisioning is
-one CLI command — ``ocr-backend download <name>`` (see :mod:`ocr_backend.cli`)
-— so the name → repo / revision → path mapping lives in exactly one file.
+``cache/ocr_backend/models/<name>/`` — gitignored and root-anchored like every
+other default path (``utils.paths``), and under ``cache/`` because a snapshot
+is reprovisionable by ``ocr-backend download`` at any time. One store keeps
+the repo root clean as more engines arrive, and adapters resolve their default
+snapshot through :func:`model_dir` instead of consumers hard-coding a
+location. Provisioning is one CLI command — ``ocr-backend download <name>``
+(see :mod:`ocr_backend.cli`) — so the name → repo / revision → path mapping
+lives in exactly one file.
 """
 
 from pathlib import Path
 from typing import NamedTuple
 
-from utils.paths import data_dir
+from utils.paths import cache_dir
 
 
 class ModelSpec(NamedTuple):
@@ -38,8 +40,8 @@ MODELS: dict[str, ModelSpec] = {
 
 
 def model_dir(name: str) -> Path:
-    """``<repo>/data/ocr_backend/models/<name>`` — the path, existing or not."""
-    return data_dir("ocr_backend") / "models" / name
+    """``<repo>/cache/ocr_backend/models/<name>`` — the path, existing or not."""
+    return cache_dir("ocr_backend") / "models" / name
 
 
 def is_ready(directory: Path) -> bool:

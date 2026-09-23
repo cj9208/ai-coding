@@ -11,7 +11,7 @@ Layout::
     ocr_backend/
       contract.py       # OcrDocument & friends — data only, import freely
       render.py         # projections: page_text / document_markdown
-      models.py         # local model snapshots: data/ocr_backend/models/<name>/
+      models.py         # local model snapshots: cache/ocr_backend/models/<name>/
       cli.py            # `ocr-backend download <name>` — one-command provisioning
       backends/         # adapters, each importing its engine lazily
 

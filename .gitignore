@@ -1,5 +1,6 @@
 .venv
 data/
+cache/
 logs/
 v/
 repo-skills/

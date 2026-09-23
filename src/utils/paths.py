@@ -19,3 +19,14 @@ def data_dir(name: str) -> Path:
     Env overrides stay in each project — this only provides the fallback.
     """
     return REPO_ROOT / "data" / name
+
+
+def cache_dir(name: str) -> Path:
+    """Reprovisionable bulk store: ``<repo>/cache/<name>``.
+
+    Same anchoring as :func:`data_dir`, different contract: everything under
+    ``cache/`` can be deleted at any time and rebuilt by its provisioning
+    command (``ocr-backend download``, the rag bench scripts). Irreplaceable
+    assets (DBs, ledgers, recordings) stay under ``data/``.
+    """
+    return REPO_ROOT / "cache" / name

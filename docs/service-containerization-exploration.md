@@ -24,7 +24,7 @@
 # 1) 构建 runner 镜像
 ocr-backend container build
 
-# 2) 模型快照在容器里下载，落到宿主机 data/ocr_backend/models/（宿主机不碰 HuggingFace）
+# 2) 模型快照在容器里下载，落到宿主机 cache/ocr_backend/models/（宿主机不碰 HuggingFace）
 ocr-backend container download paddleocr-vl-1.6
 
 # 3) 待识别文件放进 data/ocr_backend/in/（目录不存在时首次运行会自动创建），跑一次
@@ -127,7 +127,7 @@ services:
       dockerfile: docker/ocr/Dockerfile.cpu
     image: ai-coding-ocr-cpu:latest
     volumes:
-      - ../../data/ocr_backend/models:/app/data/ocr_backend/models
+      - ../../cache/ocr_backend/models:/app/cache/ocr_backend/models
       - ../../data/ocr_backend/in:/work/in:ro
       - ../../data/ocr_backend/out:/work/out
 
@@ -138,7 +138,7 @@ services:
       dockerfile: docker/ocr/Dockerfile.gpu
     image: ai-coding-ocr-gpu:latest
     volumes:
-      - ../../data/ocr_backend/models:/app/data/ocr_backend/models
+      - ../../cache/ocr_backend/models:/app/cache/ocr_backend/models
       - ../../data/ocr_backend/in:/work/in:ro
       - ../../data/ocr_backend/out:/work/out
     deploy:
@@ -150,7 +150,7 @@ services:
               capabilities: [gpu]
 ```
 
-模型挂载点是容器内的 `/app/data/ocr_backend/models`——正好等于 `utils.paths.data_dir("ocr_backend")` 在容器里的解析结果（`REPO_ROOT` = `/app`），所以 `ocr-backend download` 和适配器默认的快照查找都能直接命中宿主机那份，不用额外传 `--model-dir`。
+模型挂载点是容器内的 `/app/cache/ocr_backend/models`——正好等于 `utils.paths.cache_dir("ocr_backend")` 在容器里的解析结果（`REPO_ROOT` = `/app`），所以 `ocr-backend download` 和适配器默认的快照查找都能直接命中宿主机那份，不用额外传 `--model-dir`。
 
 关键点不是文件名，而是 CPU 与 GPU **不通过一个 Dockerfile 的条件分支混装**。GPU 镜像要同时匹配 Paddle 轮子、CUDA runtime 与宿主机 NVIDIA runtime；独立文件会使失败边界和锁定策略清楚得多。
 

@@ -10,7 +10,7 @@ skipped (``ocr_backend.render.page_text``) — see
 Deliberately thin: no engine imports, no model handling, no config surface
 beyond passing a ``PaddleOCRVLConfig`` through — where the weights live is
 ``ocr_backend``'s business (``ocr_backend.models`` prefers the repo snapshot
-under ``data/ocr_backend/models/`` automatically). The backend is lazy — the
+under ``cache/ocr_backend/models/`` automatically). The backend is lazy — the
 model loads on the first ``extract`` call, not at construction.
 """
 

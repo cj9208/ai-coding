@@ -2,14 +2,14 @@
 
 > 一句话核心：OCR 这层先定"输出契约"而不是先写 wrapper——用一份版本化的 `OcrDocument`（页 → 块，带阅读顺序、版面坐标、来源与版本元数据）做两端同步点；PaddleOCR-VL 最新版（1.6）作为首个后端，适配器只做"原生输出 → 契约"的单向映射，消费方只认契约。这样后端适配器与消费方各自迭代，互不阻塞。
 
-日期：2026-09-21。状态：§5.3 的六项真机验证已完成（结论在 §5.3，原始产物在 `data/ocr_backend/verify/`）；契约、投影与 PaddleOCR-VL 适配器已实现在 `src/ocr_backend/`（含测试）；pdf_summarizer 迁移已完成（同日：`paddle_ocr.py` 删除、桥接 `extractor/paddle_vl.py`、扫描件端到端通过，见 §7 第 3 步）；模型快照已迁入 `data/ocr_backend/models/`，下载入口已归一为 `ocr-backend download <name>`（§7 已决）；file_manager 接入未开始。读法：§2–§3 是调研事实；§4–§6 中标注"已实现"的即当前代码，未标注的仍是设计意图；§7 是剩余步骤与已决 / 待定项。
+日期：2026-09-21。状态：§5.3 的六项真机验证已完成（结论在 §5.3，原始产物在 `data/ocr_backend/verify/`）；契约、投影与 PaddleOCR-VL 适配器已实现在 `src/ocr_backend/`（含测试）；pdf_summarizer 迁移已完成（同日：`paddle_ocr.py` 删除、桥接 `extractor/paddle_vl.py`、扫描件端到端通过，见 §7 第 3 步）；模型快照已迁入 `cache/ocr_backend/models/`，下载入口已归一为 `ocr-backend download <name>`（§7 已决）；file_manager 接入未开始。读法：§2–§3 是调研事实；§4–§6 中标注"已实现"的即当前代码，未标注的仍是设计意图；§7 是剩余步骤与已决 / 待定项。
 
 ## 1. 背景与目标
 
 仓库现状里有三件事指向这次探索：
 
 - `src/pdf_summarizer/extractor/paddle_ocr.py` 曾是 PaddleOCR 2.x 风格（`PaddleOCR(...)` + `.ocr()`），把整页结果拼成一串纯文本，版面、阅读顺序、表格结构全部丢弃——已随本设计落地整体替换（§7 第 3 步）；
-- 仓库模型库 `data/ocr_backend/models/<name>/` 已就位（`data/` 整体 gitignored；路径只从 `ocr_backend.models.model_dir` 出），下载入口为 `ocr-backend download <name>`——`PaddlePaddle/PaddleOCR-VL-1.6` 快照已按此迁入，后续模型同此约定，方向已经押在 VL 路线上；
+- 仓库模型库 `cache/ocr_backend/models/<name>/` 已就位（`cache/` 整体 gitignored；路径只从 `ocr_backend.models.model_dir` 出），下载入口为 `ocr-backend download <name>`——`PaddlePaddle/PaddleOCR-VL-1.6` 快照已按此迁入，后续模型同此约定，方向已经押在 VL 路线上；
 - `pyproject.toml` 已有可独立安装的 OCR extras：前端栈 `ocr`（`paddleocr[doc-parser]`）与引擎 `paddle-cpu` / `paddle-gpu`，三个都不进核心安装，装法已就位（原 `pdf2image` 依赖随旧后端一并删除，桥接走管线内 pypdfium2）。
 
 为什么先定输出契约，而不是先写 wrapper：wrapper 的复杂度约等于各家原生输出的差异量。差异如果先被一份两端都认的契约吸收，适配器与消费方（pdf_summarizer、file_manager）就能并行推进；Paddle 侧升级（1.5 → 1.6 官方就是"零成本兼容"的例子）只需要改适配器、更新 golden 样本，契约不动。这就是"两边同步开发升级"的抓手。
@@ -58,7 +58,7 @@
 | 成绩 | OmniDocBench v1.6 96.33%（官方宣称 SOTA，同时在 v1.5 与 Real5-OmniDocBench 刷新记录） |
 | Python 包 | `paddleocr[doc-parser]`（本仓库已锁 >=3.7.0；PaddleOCR 最新为 3.7.0，2026-06-11） |
 | 运行时 | `paddlepaddle >= 3.2.1`；x86_64；macOS 官方建议走 Docker；GPU 轮子限 Windows / Linux |
-| 本地模型 | `data/ocr_backend/models/paddleocr-vl-1.6/`（HF 快照已下载，仓库统一模型库，`ocr_backend.models.model_dir` 解析；`inference.yml` 模型名 `PaddleOCR-VL-1.6-0.9B`） |
+| 本地模型 | `cache/ocr_backend/models/paddleocr-vl-1.6/`（HF 快照已下载，仓库统一模型库，`ocr_backend.models.model_dir` 解析；`inference.yml` 模型名 `PaddleOCR-VL-1.6-0.9B`） |
 
 装依赖的坑（本机实测，已解）：PyPI 上 `paddlepaddle-gpu` 最新只到 2.6.2，与 `paddlex` 3.x 不兼容（跑 OCR 直接 AttributeError）；解法是 pyproject 里声明 Paddle 官方 cu126 源并挂到 `paddle-gpu` extra（`[[tool.uv.index]]` + `[tool.uv.sources]`），`uv lock` 可直接解析出 3.3.1（详见 §7 "OCR 依赖拆分"）。
 
@@ -324,7 +324,7 @@ tests/test_ocr_backend/
 ```
 
 - pyproject：`packages` 已登记 `src/ocr_backend` 并重装 editable（仓库既有惯例）；`pydantic` 已显式加入核心依赖（契约层自用，此前只是 fastapi 的传递依赖）；OCR 重依赖拆成可独立安装的三个 extras——前端栈 `ocr` + 引擎 `paddle-cpu` / `paddle-gpu`（GPU 引擎由 pyproject 声明的 Paddle 官方源解析，见 §7）。
-- 模型库：本地权重快照统一放 `data/ocr_backend/models/<name>/`（`data/` 整体 gitignored）。名称 → HF repo + commit → 路径的映射只存一份：`ocr_backend.models` 的 `MODELS` 注册表（`ModelSpec(repo_id, revision)`）+ `model_dir`，下载入口是 `ocr-backend download <name>`（`cli.py`，`huggingface_hub.snapshot_download` 幂等、复用本地 `.cache`，已装完秒回）。`revision` 必须是完整 commit sha 而非分支名——这样换机器装到的就是同一份权重（与 `uv.lock` 同义），上游 push 不会静默改变下载内容（bandit B615 也钉这条）；新模型加一条注册表项，升级快照就是显式改 `revision`。就位判据 `models.is_ready`（`model.safetensors` 存在）由 CLI 与适配器共用。适配器在 `model_dir` 留空时自动优先仓库快照，未下载则回退引擎官方下载/缓存——消费方从不关心权重在哪。
+- 模型库：本地权重快照统一放 `cache/ocr_backend/models/<name>/`（`cache/` 整体 gitignored）。名称 → HF repo + commit → 路径的映射只存一份：`ocr_backend.models` 的 `MODELS` 注册表（`ModelSpec(repo_id, revision)`）+ `model_dir`，下载入口是 `ocr-backend download <name>`（`cli.py`，`huggingface_hub.snapshot_download` 幂等、复用本地 `.cache`，已装完秒回）。`revision` 必须是完整 commit sha 而非分支名——这样换机器装到的就是同一份权重（与 `uv.lock` 同义），上游 push 不会静默改变下载内容（bandit B615 也钉这条）；新模型加一条注册表项，升级快照就是显式改 `revision`。就位判据 `models.is_ready`（`model.safetensors` 存在）由 CLI 与适配器共用。适配器在 `model_dir` 留空时自动优先仓库快照，未下载则回退引擎官方下载/缓存——消费方从不关心权重在哪。
 - 与 pdf_summarizer `extractor/` 的关系：那套是项目内的提取策略。新层落地后 `paddle_ocr.py` 整体删除、换成薄桥接 `extractor/paddle_vl.py`（`asyncio.to_thread` 包同步 `parse`，`page_text` 投影、滤掉空页，全空则报 `No extractable text`）——迁移已随本设计完成（§7 第 3 步）。
 
 ### 5.3 真机验证清单与结论（已完成）
@@ -364,7 +364,7 @@ tests/test_ocr_backend/
 - OCR 依赖拆分（原 `ocr-gpu` 待定项的解）：extras 拆成可独立安装的三块——`ocr`（前端栈）+ `paddle-cpu` / `paddle-gpu`（引擎）。GPU 引擎不再走 PyPI（那里停在 2.6.2、与 paddlex 3.x 不兼容），而是由 pyproject 声明的 Paddle 官方 cu126 源解析（`[[tool.uv.index]]` + `[tool.uv.sources]`）；实测 `uv lock` 直接选出 `paddlepaddle-gpu 3.3.1`（官方源是 flat 页、wheel 直链无 hash，uv 兼容）。组合用法：`uv sync --extra ocr --extra paddle-gpu`。换 CUDA 通道改 index URL；特殊环境仍可退回手装：`uv pip install paddlepaddle-gpu==3.3.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/`。
 - 迁移细节（§7 第 3 步）：extractor / CLI 的后端名 `paddleocr` → `paddleocr-vl`（`auto` / `pymupdf` / `paddleocr-vl` 三选一）；旧后端的"该装哪个 extras"ImportError 提示移到适配器 `_ensure_pipeline`（旧 `paddle_ocr.py` 是这份提示的唯一副本），由 `tests/test_ocr_backend/test_paddle_mapping.py` 钉住；`auto` 链的错误语义改为"保留首个后端的诊断"——PyMuPDF 的 "corrupted or invalid" 优先于 OCR 引擎抛出的底层噪声（如 PDFium 报错）。
 - 测试约定：默认套件保持零模型加载（`test_summarize_empty_pdf` 等钉死非 OCR 后端；引擎缺失路径用 `__import__` 拦截模拟），真机路径只走 `OCR_LIVE=1` 门控与 `data/ocr_backend/verify/` 手动脚本。
-- 模型库约定：本地权重快照统一放 `data/ocr_backend/models/<name>/`（`data/` 整体 gitignored），路径只从 `ocr_backend.models.model_dir` 出；快照已从仓库根 `paddleocr-vl-1.6/` 迁入，后续模型同址管理。适配器 `model_dir=None` 时自动优先仓库快照（`model.safetensors` 存在视为下载完整），未下载才回退引擎官方下载/缓存。
+- 模型库约定：本地权重快照统一放 `cache/ocr_backend/models/<name>/`（`cache/` 整体 gitignored），路径只从 `ocr_backend.models.model_dir` 出；快照已从仓库根 `paddleocr-vl-1.6/` 迁入，后续模型同址管理。适配器 `model_dir=None` 时自动优先仓库快照（`model.safetensors` 存在视为下载完整），未下载才回退引擎官方下载/缓存。
 - 模型下载入口归一：`ocr-backend download <name>`（`src/ocr_backend/cli.py`，已注册 `[project.scripts]`）——repo id、钉死的 commit revision 与路径只在 `models.MODELS` 存一份，bash 脚本 `shell_scipts/run_paddle_download.sh` 已删除（原先同一映射在脚本与 Python 两侧各存一份，易漂移；处置原则：能收敛到 Python 入口的就不单独维护脚本）；`verify_paddle_vl_16.py` 保留（模型路径走 `model_dir`，§5.3 引用的复跑入口）；`verify_blank_image_pages.py` 删除（第 5 项结论已由 golden 样本 + 映射测试钉住，且无任何引用方）。
 
 ## 参考资料
