@@ -25,9 +25,7 @@ def test_rel_abs_roundtrip(tmp_path) -> None:
     settings = load_settings(tmp_path / "root", tmp_path / "out")
     rel = "2025/春/IMG_0001.jpg"
     path = settings.photo_path(rel)
-    assert path.parts[-3:] == ("root", "2025/春", "IMG_0001.jpg") or str(path).endswith(
-        str(rel).replace("/", "\\")
-    )
+    assert path == tmp_path / "root" / "2025" / "春" / "IMG_0001.jpg"
     (path).parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"x")
     assert settings.rel_of(path) == rel
