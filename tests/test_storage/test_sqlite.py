@@ -9,8 +9,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from storage import (
     BUSY_TIMEOUT_MS,
+    SchemaTooNewError,
     SqliteClient,
     ensure_columns,
+    get_user_version,
+    migrate,
+    set_user_version,
     sha256_hex,
     to_db_url,
 )
@@ -111,6 +115,41 @@ def test_ensure_columns_module_function_sees_added(client: SqliteClient):
 
     cols = {c["name"] for c in inspect(client.engine).get_columns("widgets")}
     assert {"one", "two", "note"} <= cols
+
+
+def test_migrate_runs_steps_in_order_and_stamps_each(client: SqliteClient):
+    seen: list[int] = []
+
+    def step(target: int):
+        def run(engine) -> None:  # noqa: ANN001
+            seen.append(target)
+            ensure_columns(engine, "widgets", {f"c{target}": "TEXT"})
+
+        return run
+
+    assert migrate(client.engine, 3, {2: step(2), 3: step(3)}) == 3
+    assert seen == [2, 3]
+    assert get_user_version(client.engine) == 3
+    from sqlalchemy import inspect
+
+    cols = {c["name"] for c in inspect(client.engine).get_columns("widgets")}
+    assert {"c2", "c3"} <= cols
+
+
+def test_migrate_baseline_is_stamp_only(client: SqliteClient):
+    """The adoption pattern: SCHEMA_VERSION=1, MIGRATIONS={1: None}."""
+    assert client.migrate(1, {1: None}) == 1
+    assert get_user_version(client.engine) == 1
+    # idempotent on reopen
+    assert client.migrate(1, {1: None}) == 1
+
+
+def test_migrate_refuses_a_schema_newer_than_the_checkout(client: SqliteClient):
+    set_user_version(client.engine, 5)
+    with pytest.raises(SchemaTooNewError, match="knows up to 3"):
+        migrate(client.engine, 3, {})
+    # the stamp survived the refused open untouched
+    assert get_user_version(client.engine) == 5
 
 
 def test_sha256_hex_variants():
