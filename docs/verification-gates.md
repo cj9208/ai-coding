@@ -88,7 +88,11 @@ Config: `.pre-commit-config.yaml`. Two families, and the split is deliberate:
 
 Config: `.github/workflows/ci.yml`. One ubuntu-latest job, three steps —
 `uv sync --locked`, `pre-commit run --all-files`, `uv run pytest --cov=src`.
-No secrets. Landed 2026-09-23, first run took 1m13s.
+No secrets. Landed 2026-09-23, first run took 1m13s. The same day `main` was
+put under branch protection with this `check` job as the required status
+(enforced for admins, force-push and deletion off): a red gate can no longer
+*sit* on main unnoticed — it cannot land at all. PR #1 was the first change
+merged under the rule.
 
 - **Why coverage is reported but not gated:** `--cov=src --cov-report=term`
   prints the per-module table so "which package is nearly untested" is visible
