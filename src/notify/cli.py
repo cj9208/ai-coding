@@ -14,82 +14,108 @@ means the invocation itself was wrong (unknown channel, bad payload).
 
 from __future__ import annotations
 
-import argparse
 import json
-import sys
-from collections.abc import Sequence
 from typing import Any
 
+import click
+
 from . import channels, config, ledger
-from .events import emit
+from .events import emit as emit_event
 
 #: emit's named kwargs — a payload key of the same name is ambiguous, so the
 #: CLI rejects it up front instead of letting **payload collide.
 _RESERVED_PAYLOAD_KEYS = {"severity", "dedup_key"}
 
 
-def cmd_emit(args: argparse.Namespace) -> int:
+@click.group()
+def cli() -> None:
+    """append-only event ledger + one-shot dispatcher"""
+
+
+@cli.command()
+@click.argument("project")
+@click.argument("kind")
+@click.option(
+    "--severity",
+    type=click.Choice(["info", "warn", "alert"]),
+    default="info",
+)
+@click.option("--dedup-key", default=None, help="default: project:kind")
+@click.argument("payload", nargs=-1, metavar="KEY=VALUE")
+def emit(
+    project: str,
+    kind: str,
+    severity: str,
+    dedup_key: str | None,
+    payload: tuple[str, ...],
+) -> None:
+    """append one event to the ledger"""
     try:
-        payload = dict(_parse_pair(p) for p in args.payload)
+        parsed = dict(_parse_pair(p) for p in payload)
     except ValueError as exc:
-        print(f"notify: {exc}", file=sys.stderr)
-        return 1
-    reserved = _RESERVED_PAYLOAD_KEYS & payload.keys()
+        raise click.ClickException(str(exc)) from exc
+    reserved = _RESERVED_PAYLOAD_KEYS & parsed.keys()
     if reserved:
         flags = ", ".join(f"--{k.replace('_', '-')}" for k in sorted(reserved))
-        print(
-            f"notify: payload keys {sorted(reserved)} are reserved"
-            f" — pass them as {flags}",
-            file=sys.stderr,
+        raise click.ClickException(
+            f"payload keys {sorted(reserved)} are reserved" f" — pass them as {flags}"
         )
-        return 1
-    event_id = emit(
-        args.project,
-        args.kind,
-        severity=args.severity,
-        dedup_key=args.dedup_key,
-        **payload,
+    event_id = emit_event(
+        project,
+        kind,
+        severity=severity,
+        dedup_key=dedup_key,
+        **parsed,
     )
     if event_id is None:
-        return 1  # emit already explained itself on stderr
-    print(f"{event_id}")
-    return 0
+        raise SystemExit(1)  # emit already explained itself on stderr
+    click.echo(f"{event_id}")
 
 
-def cmd_status(args: argparse.Namespace) -> int:
+@cli.command()
+@click.option("--project", default=None)
+@click.option("--recent", type=int, default=0, help="also list N latest events")
+def status(project: str | None, recent: int) -> None:
+    """ledger summary: counts per kind, last event"""
     led = ledger.default()
-    rows = led.summary(args.project)
+    rows = led.summary(project)
     if not rows:
-        print("ledger empty")
-        return 0
+        click.echo("ledger empty")
+        return
     width = max(len(f"{p} {k} {s}") for p, k, s, _, _ in rows)
-    for project, kind, severity, n, last_ts in rows:
-        label = f"{project} {kind} {severity}"
-        print(f"{label:<{width}}  {n:>6}  last {last_ts}")
-    print(f"total {led.total()} events")
-    if args.recent:
-        print("\nrecent:")
-        for ev in led.recent(args.recent):
-            print(f"  #{ev.id} " + channels.render(ev))
-    return 0
+    for row_project, kind, severity, n, last_ts in rows:
+        label = f"{row_project} {kind} {severity}"
+        click.echo(f"{label:<{width}}  {n:>6}  last {last_ts}")
+    click.echo(f"total {led.total()} events")
+    if recent:
+        click.echo("\nrecent:")
+        for ev in led.recent(recent):
+            click.echo(f"  #{ev.id} " + channels.render(ev))
 
 
-def cmd_dispatch(args: argparse.Namespace) -> int:
+@cli.command()
+@click.option(
+    "--channels",
+    "channel_list",
+    default=None,
+    help="override NOTIFY_CHANNELS (comma list, e.g. stdout,telegram)",
+)
+@click.option("--limit", type=int, default=500, help="max events per channel")
+def dispatch(channel_list: str | None, limit: int) -> None:
+    """deliver pending events to enabled channels"""
     names = (
-        [c.strip() for c in args.channels.split(",") if c.strip()]
-        if args.channels
+        [c.strip() for c in channel_list.split(",") if c.strip()]
+        if channel_list
         else config.enabled_channels()
     )
     led = ledger.default()
-    exit_code = 0
     for name in names:
         try:
             channel = channels.build(name)
         except channels.ChannelError as exc:
-            print(f"notify: {exc}", file=sys.stderr)
-            return 1
+            raise click.ClickException(f"notify: {exc}") from exc
         sent = failed = 0
-        for event in led.pending_for(name, limit=args.limit):
+        for event in led.pending_for(name, limit=limit):
             try:
                 channel.send(event)
                 led.mark_delivery(event.id, name, "sent")
@@ -97,10 +123,9 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             except Exception as exc:  # noqa: BLE001 — recorded, not fatal
                 led.mark_delivery(event.id, name, "failed", str(exc))
                 failed += 1
-        print(f"{name}: sent {sent}, failed {failed}")
+        click.echo(f"{name}: sent {sent}, failed {failed}")
     # failed > 0 still exits 0: escalating it into a delivery.failed alert
     # is policy.py's M1 job, not this wiring's.
-    return exit_code
 
 
 def _parse_pair(raw: str) -> tuple[str, Any]:
@@ -113,39 +138,5 @@ def _parse_pair(raw: str) -> tuple[str, Any]:
         return key, value
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="notify", description=__doc__.splitlines()[0])
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
-    p = sub.add_parser("emit", help="append one event to the ledger")
-    p.add_argument("project", help="emitting package, e.g. quantdesk")
-    p.add_argument("kind", help="dotted event name, e.g. record.batch")
-    p.add_argument("--severity", choices=["info", "warn", "alert"], default="info")
-    p.add_argument("--dedup-key", default=None, help="default: project:kind")
-    p.add_argument("payload", nargs="*", metavar="KEY=VALUE", help="JSON-typed values")
-    p.set_defaults(func=cmd_emit)
-
-    p = sub.add_parser("status", help="ledger summary: counts per kind, last event")
-    p.add_argument("--project", default=None)
-    p.add_argument("--recent", type=int, default=0, help="also list N latest events")
-    p.set_defaults(func=cmd_status)
-
-    p = sub.add_parser("dispatch", help="deliver pending events to enabled channels")
-    p.add_argument(
-        "--channels",
-        default=None,
-        help="override NOTIFY_CHANNELS (comma list, e.g. stdout,telegram)",
-    )
-    p.add_argument("--limit", type=int, default=500, help="max events per channel")
-    p.set_defaults(func=cmd_dispatch)
-
-    return parser
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    return args.func(args)
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    cli()

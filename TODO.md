@@ -38,14 +38,6 @@ the four remaining questions are recorded as resolved-as-deferred in
 
 ## Verification owed (blocked on this machine)
 
-- [ ] **click migration: regenerate the console scripts, then smoke the exes.**
-      The 2026-09-23 argparse→click switch repointed `[project.scripts]` at the
-      `:cli` objects, but the installed `.venv/Scripts/*.exe` wrappers still
-      import the removed `main` — they raise ImportError until reinstalled
-      (`python -m <pkg>.cli` works meanwhile). Same locked `photos.exe` blocks
-      this as the notify item below: stop the photo server, `uv sync`, smoke
-      `uv run quant --help` + `uv run skills list`. Fold `photos` and `notify`
-      into click when they migrate (AGENTS.md lists them as the two holdouts).
 - [ ] **Build the OCR runner image and run one real parse** (Docker Desktop,
       WSL2 backend): `ocr-backend container build` →
       `ocr-backend container download paddleocr-vl-1.6` →
@@ -93,11 +85,6 @@ the four remaining questions are recorded as resolved-as-deferred in
       (`burst_id`) ships as constant None until a real Apple BurstIdentifier is
       confirmed readable, so on-device bursts currently lean on the
       EXIF-millisecond rule — verify it actually fires on iPhone bursts.
-- [ ] **notify: finish the editable reinstall once the other session's
-      `photos serve` stops.** M0 shipped and `python -m notify.cli` smoke-passed,
-      but `uv pip install -e .` died on a locked `photos.exe`, so the
-      `uv run notify` half of the M0 acceptance (design §5) is unproven:
-      stop that server, run `uv pip install -e .`, then `uv run notify status`.
 - [ ] **notify M1: one real Telegram delivery.** Needs `@BotFather` token +
       own `chat_id` + a working `TELEGRAM_PROXY` in `.env`; then follow
       `docs/notify-design.md` §5 M1 (alert in ~1 min on the phone, silence

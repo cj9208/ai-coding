@@ -61,8 +61,8 @@ rag = "rag.cli:cli"
 skills = "skill_manager.cli:cli"
 orchestrate = "orchestrator.cli:cli"
 quant = "quantdesk.cli:cli"
-photos = "photo_desk.cli:main"
-notify = "notify.cli:main"
+photos = "photo_desk.cli:cli"
+notify = "notify.cli:cli"
 
 [dependency-groups]
 dev = [

@@ -42,7 +42,6 @@ the others, except where noted below.
   ai_market_radar, file_manager), a `@click.command` (`cli`); tests invoke via
   `click.testing.CliRunner`; keep CLI tokens compatible with the 03-usage
   docs, and reference `src/quantdesk/cli.py` for the house pattern.
-  (`photos` / `notify` are the argparse holdouts, owned by other work.)
   `skills` is the one owner of vendored AI skills —
   `sync` / `list` / `outdated` / `add` (see "AI skills & specs").
   `ocr-backend` has three subcommands: `download <model>` (provisions a
