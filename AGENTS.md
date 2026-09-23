@@ -203,6 +203,10 @@ are already there). Env convention lives only in
 - Design/explanation docs live in `docs/`; the house style explains *why*
   each choice was made, with a big-picture ASCII diagram up front
   (see `docs/ai-market-radar-pipeline.md` as the reference example).
+- `docs/verification-gates.md` is the single map of every check the repo
+  runs (pre-commit L1 → CI L2 → live/real-env L3 → recorded evidence L4),
+  with the add-a-gate checklist; keep its tables honest when a gate lands
+  or a TODO.md debt is paid.
 - Multi-part designs get a folder (`docs/research-recommendation-agent/`)
   with a numbered overview as the entry point.
 - `docs/scaling-lessons.md` is the cross-cutting digest: the scale
