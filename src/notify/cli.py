@@ -4,6 +4,7 @@
     notify status [--project P] [--recent 20]
     notify dispatch [--channels stdout,telegram] [--limit 500]
     notify check [--send]
+    notify schedule install [--interval-minutes 5] | status | run-now | remove
 
 ``dispatch`` is the short-lived process a scheduler launches every few minutes
 (§1: no daemon), and one invocation walks §4 in order: rules turn a silence into an
@@ -13,6 +14,8 @@ becomes a self-alert for the next round. Delivery *failures* still exit 0 —
 the failure is now a ledger row, which is the layer's whole point; a non-zero
 exit means the invocation itself was wrong (unknown channel, bad payload,
 unreadable rules file).
+
+``schedule`` wraps what makes that launcher correct (§4.9) so nobody retypes it.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from typing import Any
 import click
 
 from . import channels, config, ledger, policy, rules
+from . import schedule as sched
 from .events import Event, Severity
 from .events import emit as emit_event
 
@@ -210,6 +214,64 @@ def check(do_send: bool) -> None:
             click.echo(f"probe {name}: FAILED — {exc}")
         else:
             click.echo(f"probe {name}: ok")
+
+
+@cli.group(name="schedule")
+def schedule_cmd() -> None:
+    """register the recurring `dispatch` round (Task Scheduler, §4.9)"""
+
+
+@schedule_cmd.command(name="install")
+@click.option(
+    "--interval-minutes",
+    type=click.IntRange(min=1),
+    default=sched.DEFAULT_INTERVAL_MINUTES,
+    show_default=True,
+    help="how often dispatch runs; also bounds alert latency",
+)
+def schedule_install(interval_minutes: int) -> None:
+    """register (or update) the task — the scheduler, not a human, runs dispatch"""
+    try:
+        sched.install(interval_minutes)
+    except sched.ScheduleError as exc:
+        raise click.ClickException(f"notify: {exc}") from exc
+    click.echo(
+        f"registered '{sched.TASK_NAME}' every {interval_minutes} min"
+        f" — check with `notify schedule status`, log at {sched.LOG_PATH}"
+    )
+
+
+@schedule_cmd.command(name="remove")
+def schedule_remove() -> None:
+    """unregister the task"""
+    try:
+        sched.remove()
+    except sched.ScheduleError as exc:
+        raise click.ClickException(f"notify: {exc}") from exc
+    click.echo(f"unregistered '{sched.TASK_NAME}'")
+
+
+@schedule_cmd.command(name="run-now")
+def schedule_run_now() -> None:
+    """fire one round through the scheduler — proves the launch, not just dispatch"""
+    try:
+        sched.run_now()
+    except sched.ScheduleError as exc:
+        raise click.ClickException(f"notify: {exc}") from exc
+    click.echo(
+        f"started '{sched.TASK_NAME}' — give it a few seconds,"
+        " then `notify schedule status`"
+    )
+
+
+@schedule_cmd.command(name="status")
+@click.option("--log-lines", type=int, default=10, show_default=True)
+def schedule_status(log_lines: int) -> None:
+    """the scheduler's view of the task, plus the tail of its dispatch log"""
+    try:
+        click.echo(sched.status(log_lines=log_lines))
+    except sched.ScheduleError as exc:
+        raise click.ClickException(f"notify: {exc}") from exc
 
 
 def _run_rules(led: ledger.Ledger) -> None:

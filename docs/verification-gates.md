@@ -137,7 +137,7 @@ owner row in `TODO.md` so "not yet verified" stays a debt, not a myth:
 | Docker OCR runner | `ocr-backend container build\|download\|parse [--gpu]` on a Docker Desktop host | **never verified end-to-end** — unit tests fake `subprocess.run`; TODO.md |
 | photo_desk HEIC + NAS | real device tree mounted at `PHOTO_ROOT` | acceptance debt recorded in TODO.md (both M0 and M1 lines) |
 | quantdesk WS recording | a network where fstream actually pushes | live-verified gap: this machine's WS is silent; liquidation *positive* path awaits TODO.md |
-| notify Telegram delivery | real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, then `uv run notify emit … --severity alert && uv run notify dispatch` | **verified 2026-09-23** — four acceptance items on a real phone, evidence table in `docs/notify-design.md` §5; owed: one *unattended* round (no scheduler registered yet, TODO.md) |
+| notify Telegram delivery | real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, then `uv run notify emit … --severity alert && uv run notify schedule run-now && uv run notify schedule status` | **verified 2026-09-23** — four acceptance items on a real phone, plus one *unattended* round launched by the registered Task Scheduler (`LastTaskResult 0`, log tail in `data/notify/dispatch.log`); owed: the closed-lid sleep-wake catch-up (TODO.md) |
 | skill sync reproducibility | `uv run skills sync` on a deleted clone | verified: clone returned at its pin; keep as the check whenever UPSTREAMS changes |
 
 The rule that keeps this layer honest: **a connectivity that *pretends* to
@@ -198,6 +198,7 @@ uv run pytest tests/test_photo_desk -q            # one subsystem
 OCR_LIVE=1 uv run pytest tests/test_ocr_backend/test_paddleocr_vl_live.py   # L3
 LLM_API_KEY=... uv run pytest tests/test_pdf_summarizer -q                   # L3
 uv run notify check --send                        # L3: dry-run rules + probe every channel
+uv run notify schedule status                     # L3: did the scheduler launch dispatch, and what did it print?
 uv run orchestrate golden run                     # L4 re-check
 gh run list / gh run watch <id>                   # L2 hosted runs
 ```

@@ -57,20 +57,20 @@ the four remaining questions are recorded as resolved-as-deferred in
 
 ## Known gaps in what shipped
 
-- [ ] **No scheduler actually exists — the design's premise is still manual.**
-      notify's contract assumes `dispatch` is launched by a scheduler (never a
-      daemon), and quant record / ai-market-radar scan are background-shaped,
-      but no Windows Task Scheduler task has ever been registered — every run
-      so far was human-launched. The recipe is now written
-      (`docs/notify-design.md` §4.9; PowerShell `Register-ScheduledTask`, since
-      `schtasks /create` has no working-directory flag and `uv` needs the repo
-      root). Two things still owed, in this order: register one
-      `notify dispatch` task and prove the ledger fills while nobody watches,
-      then close the laptop lid for 20 minutes and confirm
-      `data/notify/dispatch.log` shows `StartWhenAvailable` replaying the
-      missed rounds. Until then the "silence is detected" chain (L2/L3 of
-      `docs/notify-design.md`) has never seen a real unattended cycle, and the
-      same recipe extends to `quant record` afterwards.
+- [ ] **Two scheduler proofs still owed (notify's own round is registered and
+      running).** `notify schedule install` registered the `notify-dispatch` task
+      on 2026-09-23 and its first unattended round delivered an alert to a real
+      phone with nobody typing `dispatch` — evidence in
+      `docs/notify-design.md` §4.9. What that does *not* prove:
+      (a) **sleep-wake catch-up** — close the lid for 20 minutes, wake it, and
+      confirm `data/notify/dispatch.log` shows `StartWhenAvailable` replaying the
+      missed rounds (needs a physical action; until then catch-up is paper logic);
+      (b) **the long-running tasks are still not scheduled at all** — `quant
+      record` / `ai-market-radar scan` are background-shaped but human-launched,
+      which is also why `config/notify/expectations.yaml`'s one silence rule
+      ships `enabled: false`. `notify schedule` wraps only the dispatch task, so
+      (b) is its own wrapper decision (a different task, different executable,
+      different log), not a flag on this one.
 - [ ] **ocr-review: one real mouse drag-to-add-block in a visible browser
       window.** Everything else (pixel alignment, corrected/rejected/added
       blocks, save/409, export) was verified end-to-end, but the headless

@@ -2,7 +2,7 @@
 
 > 一句话核心：任务只往**本地账本**记结构化事件，**投递由独立的一次性分发器完成**——运行状态与 alert 是同一条通道上的两种节奏，渠道是可插拔适配器，"谁来监督监控者"的递归止于**不同失败域的叠加**而非无限套娃。
 
-日期：2026-09-22。状态：**M1 shipped 2026-09-23**（telegram 适配器 / policy / rules + expectations.yaml / 完整 dispatch / `notify check`；`tests/test_notify/` 79 测试绿，§5 的四项真机验收全过，证据见 §5）。M0（2026-09-22：config / events / ledger / channels(stdout) / cli）已并入。唯一欠账：**计划任务尚未在这台机器上注册**——接线文档已写（§4.9），注册与错过补偿待真机验证，记 TODO.md。读法：§1–§2 是需求与已定裁决（背景）；§3–§4 是实现契约（开工后以本节为准）；§5 是里程碑与验收标准；§6–§8 是风险、依赖与待定项。
+日期：2026-09-22。状态：**M1 shipped 2026-09-23**（telegram 适配器 / policy / rules + expectations.yaml / 完整 dispatch / `notify check` / `notify schedule`；`tests/test_notify/` 105 测试绿，§5 的四项真机验收全过，证据见 §5）。M0（2026-09-22：config / events / ledger / channels(stdout) / cli）已并入。计划任务**已在本机注册**（`notify schedule install`，§4.9），无人值守的一轮已由调度器自己跑通并送达手机；唯一欠账：**合盖睡眠后的补跑尚未物理验证**（`-StartWhenAvailable` 的语义，记 TODO.md）。读法：§1–§2 是需求与已定裁决（背景）；§3–§4 是实现契约（开工后以本节为准）；§5 是里程碑与验收标准；§6–§8 是风险、依赖与待定项。
 
 ## 1. 背景与目标
 
@@ -73,8 +73,9 @@
 | `rules.py` | 期望规则评估：给定账本 + `expectations.yaml`，产出应生成而未生成的 alert 事件（§4.5） |
 | `policy.py` | 纯函数：一批待发事件 → 节流/合并/优先级排序后的投递计划（§4.4），规则改动过 golden |
 | `channels/` | `base.py` 适配器接口 + `stdout.py` / `telegram.py` / `ping.py` |
+| `schedule.py` | 把"谁来拉起 dispatch"包成一个命令：构造/注册/查询/删除计划任务，路径全部由 `REPO_ROOT` 推导（§4.9）；只 shell 到系统调度器，不做常驻 |
 | `digest.py` | 从账本聚合渲染日摘要文本（投影，不改变账本） |
-| `cli.py` | `notify emit / status / dispatch / digest / check` 入口 |
+| `cli.py` | `notify emit / status / dispatch / digest / check / schedule` 入口 |
 
 ## 4. 核心契约
 
@@ -176,38 +177,35 @@ SMTP_*                 （M2 兜底渠道时再定，不预留空壳）
 
 ### 4.9 dispatch 的调度接线（Windows 计划任务）
 
-§1 那条非目标（不做常驻 daemon）加上 §4.6 的 L2，合起来就是"dispatch 是被计划任务拉起的短进程"，于是**这条通道唯一的常驻组件是操作系统的调度器**——notify 自己不 fork、不守护。M1 交付的是接线方法，注册动作留在机器上由 owner 执行（改变的是系统状态，不是仓库状态；见 §5 末与 TODO.md）。
+§1 那条非目标（不做常驻 daemon）加上 §4.6 的 L2，合起来就是"dispatch 是被计划任务拉起的短进程"，于是**这条通道唯一的常驻组件是操作系统的调度器**——notify 自己不 fork、不守护。M1 交付的是 `notify schedule`：注册本身仍是一个由 owner 执行的命令（它改的是系统状态，不是仓库状态），但命令背后那份该记的东西——路径、间隔、补跑、日志——由代码负责每次都对。
 
-**周期怎么定**：alert 的到达上界就是调度周期（emit 只写账本，投递要等下一轮 dispatch）。节流窗口是 1h，所以 1 分钟一轮不会多发消息，只会更早发。默认按 5 分钟记；要 §5 那条"一分钟内收到"字面成立，就把周期改成 1。空转的一轮成本是一次 SQLite 读 + 一次 YAML 读，毫秒级。
+**周期怎么定**：alert 的到达上界就是调度周期（emit 只写账本，投递要等下一轮 dispatch）。节流窗口是 1h，所以 1 分钟一轮不会多发消息，只会更早发。默认 5 分钟（`DEFAULT_INTERVAL_MINUTES`）；要 §5 那条"一分钟内收到"字面成立，`notify schedule install --interval-minutes 1`。空转的一轮成本是一次 SQLite 读 + 一次 YAML 读，毫秒级。
 
-**工作目录必须是仓库根**（`uv` 在这里找 `pyproject.toml` 与 `.venv`），而这一点在两种写法里的成本不同——本机实测 `schtasks /create` 的旗标表里**没有**工作目录项（`/D /DELAY /DU /EC /ED /ET /F /I /IT /K /M /MO /NP /P /RI /RL /RP /RU /S /SD /ST /TN /TR /U /V1 /XML /Z`），所以只能把它写进命令行里：
+**注册是一个命令**（`src/notify/schedule.py`）：
 
 ```
-:: 最小式：没有 /WD，只能在 /TR 里自己 cd
-schtasks /Create /SC MINUTE /MO 5 /TN "notify-dispatch" ^
-  /TR "cmd /c cd /d C:\Users\cjdyx\Downloads\Code_Repo\ai-coding && uv run notify dispatch >> data\notify\dispatch.log 2>&1"
+uv run notify schedule install [--interval-minutes 5]   # 注册/更新
+uv run notify schedule status                          # 调度器视角 + dispatch.log 尾部
+uv run notify schedule run-now                         # 立刻补一轮（走调度器，不是人肉 dispatch）
+uv run notify schedule remove
 ```
 
-```powershell
-# 推荐式：只有这条路能显式设工作目录、错过补跑与超时
-$action = New-ScheduledTaskAction -Execute "cmd.exe" `
-  -Argument '/c uv run notify dispatch >> data\notify\dispatch.log 2>&1' `
-  -WorkingDirectory "C:\Users\cjdyx\Downloads\Code_Repo\ai-coding"
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-  -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 9999)
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
-  -ExecutionTimeLimit (New-TimeSpan -Minutes 4)   # 短于周期：卡住的一轮不许压住下一轮
-Register-ScheduledTask -TaskName "notify-dispatch" -Action $action `
-  -Trigger $trigger -Settings $settings
-```
+它生成的是 `Register-ScheduledTask`，把该记的事每次都记对，而不是靠人记得：工作目录 = `REPO_ROOT`、重跑间隔、`-StartWhenAvailable`、stdout/stderr 重定向到 `data/notify/dispatch.log`。**为什么不是 `schtasks`**：本机实测它的旗标表里**没有**工作目录项（`/D /DELAY /DU /EC /ED /ET /F /I /IT /K /M /MO /NP /P /RI /RL /RP /RU /S /SD /ST /TN /TR /U /V1 /XML /Z`），只能把 `cd /d` 塞进 `/TR`；而 `StartWhenAvailable`（错过补跑）与 `ExecutionTimeLimit` 只有 `Register-ScheduledTask` 能显式设。动作直接调用装好的 `.venv/Scripts/notify.exe` 而不是 `uv run`：无人值守的进程不该依赖 `uv` 在 `PATH` 上、也不该在那一刻赌解析器的判断。
 
-三条约定与它们的理由：
+真机注册时踩到三个 PowerShell 的坑，都写进了实现（每一条都会"看起来成功"）：
+
+- **`schtasks /Query /V` 的字段名跟着控制台 UI 语言走**，这台机器答中文，按英文 label 过滤会静默返回空——`status` 因此读 `Get-ScheduledTask` / `Get-ScheduledTaskInfo` 的属性名（与 locale 无关）；
+- **cmdlet 失败默认是 non-terminating error**：`-Command` 里一条坏语句可以什么都不打印、仍然 exit 0。所以每条命令都以 `$ErrorActionPreference = 'Stop'` 开头——否则 `schedule status` 会显示成"调度器是空的"，而它其实是"我没读懂"；
+- **双引号字符串只展开变量，不展开成员访问**：`"$t.State"` 打出来的是对象的 `ToString()` 加字面量 `.State`，属性必须写成 `$($t.State)`。第一条命令就打了这么一行废话给我看。
+
+四条约定与它们的理由：
 
 - **`-StartWhenAvailable`（错过补偿）是必需的**，不是可选优化：机器睡眠/重启后调度器会丢掉整段窗口，没有它 L2 的故障面等于"这台机器上次开机以来"。它补的是"漏跑"，补不了"这台机器根本没醒"——后者仍是 L3/L4 的领地（§4.6）；
-- **`ExecutionTimeLimit` 小于周期**：一轮 dispatch 正常是秒级，超时只可能是网络卡在某个渠道上；让它死掉、由下一轮重试，比让它无限占着进程更符合"短进程"的设定，卡住这件事本身已经在 `deliveries` 的 `failed` 行里了；
-- **日志落在 `data/notify/dispatch.log`**：`data/` 与 `cache/` 的分界判据是"有没有命令能重建它"（AGENTS.md）——账本能回答"消息发没发出去"，但答不了"调度器有没有把我拉起来、起来后死在哪一行"，那条证据只在 stdout/stderr 里，不可再生，所以归 `data/`。这也正是 `check` 存在的理由：怀疑调度器时先 `notify check` 看配置与规则，再看这个日志。
+- **`ExecutionTimeLimit` = 周期**（设计期写的是"短于周期"，实现时改了）：一轮 dispatch 正常是秒级，超时只可能是网络卡在某个渠道上；让它死掉、由下一轮重试。不许轮次叠轮次靠的不是把时限设小——Task Scheduler 默认就不允许同一任务并发实例，时限只是兜底；
+- **电池策略 `-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries`**：这是一台笔记本。默认设置下"拔了电源"就够让一轮告警投递不被启动，而 notify 存在的理由恰恰是人不盯着的时候；
+- **日志落在 `data/notify/dispatch.log`**：`data/` 与 `cache/` 的分界判据是"有没有命令能重建它"（AGENTS.md）——账本能回答"消息发没发出去"，但答不了"调度器有没有把我拉起来、起来后死在哪一行"，那条证据只在 stdout/stderr 里，不可再生，所以归 `data/`。**它没有轮转**：一轮一行/渠道，默认周期下约 1.5k 行/天，且绝大多数是 `messages 0, sent 0`；不预先造 rotation（`status` 只读尾部若干行，文件大小的痛要晚得多才出现），等它真的开始占地方再决定截断策略。怀疑调度器时：先 `notify schedule status`（它把这一页日志的尾巴塞进输出），再 `notify check` 看配置与规则。
 
-注册后确认可用的两个动作（本轮还没做，欠在 TODO.md）：`schtasks /Run /TN notify-dispatch` 手动拉起一次并核对手机上收到，以及合盖睡眠 20 分钟再唤醒，看 `dispatch.log` 里是否出现补跑的那几轮。
+**已注册并真机跑过（2026-09-23）**：`schedule install` 之后，第一轮无人值守的 dispatch 由调度器在 `12:50:33` 自己拉起（`LastTaskResult 0`），投递了 09-22 那条还压在账本里的 `quantdesk.ws.silent` alert——`deliveries` 里 event 2 首次出现 `telegram/sent` 行（这一行是适配器拿到 Telegram 的 `ok` 才写的），而这一轮没有任何人敲过 `notify dispatch`。到达手机这一段不是本轮新证的，是上面四项验收已经走过的那条通路。随后 `schedule run-now` 再补一轮：`telegram: messages 0, sent 0`——同一条已 sent 的事件没有被重发，节流与 pending 过滤在跨调度轮次上也成立。**唯一仍欠的实测**：合盖睡眠 20 分钟再唤醒，看 `dispatch.log` 里是否出现补跑的那几轮（`-StartWhenAvailable` 的语义验证，要物理动作，记 TODO.md）。
 
 **为什么不用仓里已有的 `src/task_queue`**：那是一个**进程内**的异步队列，把 dispatch 投成它的一条 lane 就等于让告警通道的存活依赖于"某个常驻进程正好在跑"——D-5 排除常驻 daemon 的理由一个字都没变，何况 task_queue 自己挂掉时没有任何层会报警（监控者与被监控者同进程）。操作系统的调度器是这里唯一合理的宿主：它自己死了，是 §4.6 的 L3/L4 该说话的事。
 
@@ -218,7 +216,7 @@ Register-ScheduledTask -TaskName "notify-dispatch" -Action $action `
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
 | **M0 账本与门面**（零网络） | config / events / ledger / cli `emit`+`status`、stdout 适配器、最简 dispatch（无节流直投 stdout） | 测试目录：emit 一万条后 `status` 按 project/kind 计数正确；重复 dispatch 幂等（不重发 stdout 已 sent 的行）；账本库损坏时 emit 不抛异常仅 stderr；`tests/test_notify/` 全绿、`uv run notify` 可用 |
-| **M1 alert 通路**（第一个真渠道 + 静默检测） | telegram 适配器（代理）/ policy（优先级+节流+升级）/ rules + expectations.yaml / 完整 dispatch + cron（Windows 计划任务）接线文档 | 真机：`notify emit --severity alert` 一分钟内手机收到；伪造 3h 无 `record.batch` 事件 → dispatch 当轮生成并送达静默 alert；同 key alert 连发 5 条 → 只收到 1 条即时 + 1 条合并；拔掉代理跑 dispatch → 产生 `delivery.failed` alert，接回后下轮补发；`policy.plan` golden 用例入库 |
+| **M1 alert 通路**（第一个真渠道 + 静默检测） | telegram 适配器（代理）/ policy（优先级+节流+升级）/ rules + expectations.yaml / 完整 dispatch + `notify schedule`（Windows 计划任务接线，§4.9） | 真机：`notify emit --severity alert` 一分钟内手机收到；伪造 3h 无 `record.batch` 事件 → dispatch 当轮生成并送达静默 alert；同 key alert 连发 5 条 → 只收到 1 条即时 + 1 条合并；拔掉代理跑 dispatch → 产生 `delivery.failed` alert，接回后下轮补发；`policy.plan` golden 用例入库 |
 | **M2 digest + L3 + 首接线** | digest 日摘要、ping 适配器（L3）、邮件兜底适配器、quantdesk record 接线（§4.8） | 真实 recorder 跑一天：次日 digest 含各流行数/最后数据时间/gap 清单；L3 ping URL 在 Healthchecks 显示连续、手动停 dispatch 一个超时窗后收到对方告警；`notify status --project quantdesk` 回答"昨天缺哪个小时"无需翻文件 |
 
 M3（显式 gated）：多渠道矩阵（ntfy/企微）、事件保留策略、Web 状态页——各等真实使用暴露需求再立项。
@@ -237,9 +235,9 @@ M3（显式 gated）：多渠道矩阵（ntfy/企微）、事件保留策略、W
 两处如实记录的偏差：
 
 1. **"拔掉代理"改为"把代理指到一个死端口"**（`TELEGRAM_PROXY=http://127.0.0.1:1`）。语义等价（都是 `httpx.ConnectError` → `ChannelError` → `failed` 行），且可复现；真拔代理在这台机器上反而造不出故障——§4.7 记的正是"本机不需要代理"；
-2. **"一分钟内收到"目前测的是 emit→dispatch→手机这条通路本身**（手动 dispatch，秒级到达）。调度周期尚未注册（§4.9），所以端到端上界还是"下一个调度点"，不是 1 分钟。M1 的验收行不含注册，欠账记在 TODO.md，不在此处算过。
+2. **"一分钟内收到"测的是 emit→dispatch→手机这条通路本身**（手动 dispatch，秒级到达）。注册之后（§4.9），端到端上界变成"下一个调度点"= 调度周期，默认 5 分钟；要字面成立就 `notify schedule install --interval-minutes 1`——节流窗口 1h 保证加密周期只会更早发、不会多发。无人值守那一轮的证据在 §4.9 末（调度器自己拉起、`LastTaskResult 0`、手机上收到 09-22 那条 alert）。
 
-离线侧的证据面：`tests/test_notify/` 79 绿（含 `tests/golden/notify_policy.jsonl` 8 条 golden 把 §4.4 的每条规则钉成数据：首条必发、一轮内 5→2、窗口内重复、窗口过期、按 dedup_key 分流域、urgent info、连败 3 轮 stuck 且自告不参与、2 轮不算 stuck）。全仓 756 绿。所有测试都不碰网络也不碰真 `.env`：telegram 用 `httpx.MockTransport`，凭证由 fixture 覆盖。
+离线侧的证据面：`tests/test_notify/` 105 绿（含 `tests/golden/notify_policy.jsonl` 8 条 golden 把 §4.4 的每条规则钉成数据：首条必发、一轮内 5→2、窗口内重复、窗口过期、按 dedup_key 分流域、urgent info、连败 3 轮 stuck 且自告不参与、2 轮不算 stuck）。全仓 782 绿。所有测试都不碰网络、不碰真 `.env`、也不碰调度器：telegram 用 `httpx.MockTransport`，凭证由 fixture 覆盖，`test_schedule.py` 把 `subprocess.run`/`shutil.which`/`platform.system` 全部换成假的，只断言它**将要**执行的那段 PowerShell 长什么样。
 
 ## 6. 已知风险（正面记录，不掩盖）
 
@@ -247,11 +245,12 @@ M3（显式 gated）：多渠道矩阵（ntfy/企微）、事件保留策略、W
 2. **L3 第三方在国内可达性未验证**：Healthchecks.io 的 ping 出向请求与告警回推（默认邮件）需 M2 真机验证；不通则 L3 降级、L4 权重上升，并在 digest 文案中明示"L3 当前未生效"——不假装四层都在。
 3. **刷屏 → 被屏蔽 → 渠道死亡**是自建通知最常见的死因：M1 验收特意包含节流用例；info 永远攒批是硬规矩，不是默认值。
 4. **账本膨胀**：emit 永不阻塞意味着长跑任务可能堆百万行 info。个人量级 SQLite 无压力（orchestrator 05a 实测口径），但 digest 的聚合读要按 (project,kind,day) 走索引，M0 建库时即建。
-5. **计划任务本身没跑**（Windows 重启后任务丢失/睡眠错过）：这恰是 L3 设计覆盖的故障——ping 断供由外部说话；L3 未生效前，此项风险已知且接受，记录于此。
+5. **计划任务本身没跑**（Windows 重启后任务丢失/睡眠错过）：机器侧的缓解已落地并注册（§4.9：`-StartWhenAvailable` 补跑 + 电池策略 + `dispatch.log` 作为"调度器有没有拉起我"的唯一证据），但"合盖睡眠后到底补没补"仍是纸面推断——真要证它得物理合盖一次，欠在 TODO.md。这一层之上仍是 L3 的领地：ping 断供由外部说话；L3 未生效前，此项风险已知且接受，记录于此。
 
 ## 7. 依赖与接入清单
 
 - **实际 import 面**：`click`（CLI）、`httpx`（telegram 适配器）、`sqlalchemy`（经 `src/storage`）、`python-dotenv`（读 `.env`）、`yaml`（`rules.load`）。**五个全部在 `pyproject.toml` 声明**（2026-09-23 补齐 `click`+`pyyaml`——此前全仓靠 `streamlit` 的传递依赖在场，`orchestrator/registry.py` 用 `yaml` 已是同一个缺口：删掉 streamlit 会打死十一个 CLI）。补声明时踩到一个真机 gotcha：`uv add` 会附带一次不带 extras 的 `uv sync`，于是本机 venv 里的 `ocr` + `paddle-gpu` 两包被静默卸掉——**改依赖后要用 `uv sync --locked --extra ocr --extra paddle-gpu` 复原**，别只盯着 `uv.lock` 的 diff。SMTP 兜底用 stdlib `smtplib`（M2 时定）。
+- `schedule.py` 的 import 面是纯 stdlib（`platform`/`shutil`/`subprocess`/`pathlib`）+ `utils.paths`：它要在没有人盯着的时候运行，多一个第三方入口就多一种"那次恰好没装"的失败方式。因此也不引入 `pywin32` 之类的计划任务库——PowerShell 是 Windows 自带且一定在场的。
 - 新顶层包 gotcha：建 `src/notify/` 后加入 `pyproject.toml` 的 `[tool.hatch.build.targets.wheel] packages` 并 `uv pip install -e .`（AGENTS.md 记录的坑）。
 - `[project.scripts]` 增 `notify = "notify.cli:cli"`（click group，2026-09-23 全仓 CLI 迁移后的统一姿势）。
 - 数据目录 `data/notify/`（repo-root 锚定）；配置 `config/notify/expectations.yaml`（tracked，改动即规则变更评审）。
@@ -262,8 +261,8 @@ M3（显式 gated）：多渠道矩阵（ntfy/企微）、事件保留策略、W
 M1 收口的三项：
 
 1. **Telegram 形态 = 纯 `sendMessage`（已定，2026-09-23）**。v1 不带 inline 按钮：按钮要 webhook 或轮询 `getUpdates`，前者要求一个可被外网寻址的端点（与"不租 VPS"冲突），后者把 dispatch 变成常驻消费者（与 §1 的短进程前提冲突）。静音/确认因此写在文案里由人处理，不做成机器能力。真要它，起点是给 `TelegramChannel` 加一个 `getUpdates` 的读侧 + 一个新的 `snooze` 规则，而不是改 policy；
-2. **`notify check` 的边界 = 三件事，且只这三件（已定）**：配置校验（账本路径、渠道名可解析——未知名非零退出）、规则 dry-run（打印"现在会 firing 什么"，**不写账本**）、可选 `--send` 逐渠道试发（失败只打印不退出，因为它诊断的是连通性不是配置）。错误文案只点名变量名（`TELEGRAM_BOT_TOKEN`）绝不点值，这条有测试守着；
-3. **计划任务的落地方式已定、注册未做**：两种方式都写进 §4.9，推荐 PowerShell 那式不是风格问题——本机实测 `schtasks /create` 没有工作目录旗标（只能把 `cd /d` 塞进 `/TR`），也只有 `Register-ScheduledTask` 能显式设 `StartWhenAvailable`（错过补跑）与 `ExecutionTimeLimit`；错过补偿是 §6.5 那条风险的唯一机器侧缓解。**这台机器上还没注册**：注册改的是系统状态，由 owner 执行；跑通手动触发一次与睡眠唤醒后的补跑，仍欠在 TODO.md（M2 的 L3 ping 之前先把这个补上，否则 L2/L3 一起是空的）。
+2. **`notify check` 的边界 = 三件事，且只这三件（已定）**：配置校验（账本路径、渠道名可解析——未知名非零退出）、规则 dry-run（打印"现在会 firing 什么"，**不写账本**）、可选 `--send` 逐渠道试发（失败只打印不退出，因为它诊断的是连通性不是配置）。错误文案只点名变量名（`TELEGRAM_BOT_TOKEN`）绝不点值，这条有测试守着。**"计划任务在不在场"不属于这三件**（2026-09-23 再确认）：那是 `notify schedule status` 的职责，`check` 因此一次也不 shell 到 PowerShell，保持与平台无关；
+3. **计划任务的落地方式已定并已注册（2026-09-23）**：不再是文档里的一段 PowerShell，而是 `notify schedule install / status / run-now / remove`（§4.9）。选 `Register-ScheduledTask` 而非 `schtasks` 不是风格问题——本机实测 `schtasks /create` 没有工作目录旗标（只能把 `cd /d` 塞进 `/TR`），也只有 `Register-ScheduledTask` 能显式设 `StartWhenAvailable`（错过补跑）与 `ExecutionTimeLimit`。**注册已完成、无人值守一轮已由调度器自己跑通并送达手机**；仍欠的只有"合盖睡眠 20 分钟再唤醒后 `dispatch.log` 里出现补跑轮次"这一条物理验证（记 TODO.md，M2 的 L3 ping 之前补上，否则 L2 的补跑语义与 L3 一起是空的）。
 
 仍待定：
 
