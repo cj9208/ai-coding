@@ -123,7 +123,7 @@ def cli() -> None:
 @cli.command("download")
 @click.argument("model", type=click.Choice(sorted(MODELS)))
 def download_cmd(model: str) -> None:
-    """fetch a model snapshot into data/ocr_backend/models/"""
+    """fetch a model snapshot into cache/ocr_backend/models/"""
     dest = download(model)
     if not is_ready(dest):
         raise click.ClickException(

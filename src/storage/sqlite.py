@@ -6,8 +6,10 @@ Everything here is *SQLite knowledge*, learned the hard way in this repo:
   on ``Engine`` re-registers on every make_engine call and leaks into
   unrelated engines in the process).
 - ``check_same_thread=False`` so one engine can serve FastAPI's threadpool.
-- Lightweight additive schema patches (``ensure_columns``) instead of a
-  migration framework: small single-user DBs only ever need ADD COLUMN.
+- Two-tier schema evolution, no migration framework: ``ensure_columns`` for
+  everything that is only ADD COLUMN, and a ``user_version`` stamp with
+  ``migrate()`` for the day a change is *not* additive (rename, semantics,
+  index rebuild) — see the graduation rule in docs/storage-usage-guide.md.
 
 Both consumption styles used in this repo are supported side by side:
 SQLAlchemy (file_manager / research_agent) through ``session()``, and raw
@@ -17,6 +19,7 @@ DBAPI (ai_market_radar today) through ``connect()``.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Mapping
@@ -88,6 +91,50 @@ def ensure_columns(
     return added
 
 
+class SchemaTooNewError(RuntimeError):
+    """The DB carries a schema stamp newer than this checkout understands."""
+
+
+def get_user_version(engine: Engine) -> int:
+    """The schema stamp in the DB header (0 = never stamped)."""
+    with engine.connect() as conn:
+        return int(conn.execute(text("PRAGMA user_version")).scalar_one())
+
+
+def set_user_version(engine: Engine, version: int) -> None:
+    """Write the schema stamp; PRAGMA takes no bind parameters."""
+    with engine.begin() as conn:
+        conn.execute(text(f"PRAGMA user_version={int(version)}"))
+
+
+def migrate(
+    engine: Engine,
+    current: int,
+    steps: Mapping[int, Callable[[Engine], None] | None] | None = None,
+) -> int:
+    """Bring the DB up to ``current``, the checkout's schema version; returns
+    it. ``steps[v]`` transforms a v-1 DB into v — or ``None`` for a
+    stamp-only bump, which is how a project adopts the convention: declare
+    ``SCHEMA_VERSION = 1`` with ``MIGRATIONS = {1: None}`` and every existing
+    versionless file gets baselined on next open. The stamp is written after
+    each step, so an interrupted multi-step run resumes where it stopped.
+    A stamp newer than ``current`` raises :class:`SchemaTooNewError` instead
+    of letting old code corrupt new data."""
+    version = get_user_version(engine)
+    if version > current:
+        raise SchemaTooNewError(
+            f"database is at schema version {version}, this checkout only "
+            f"knows up to {current} — update the code before opening it"
+        )
+    steps = steps or {}
+    for target in range(version + 1, current + 1):
+        step = steps.get(target)
+        if step is not None:
+            step(engine)
+        set_user_version(engine, target)
+    return current
+
+
 def sha256_hex(data: str | bytes, *, length: int | None = None) -> str:
     """Content digest for dedup. Projects choose their own truncation (full
     64 hex for file bytes, 16 for capture text); only the recipe is shared."""
@@ -126,6 +173,13 @@ class SqliteClient:
 
     def ensure_columns(self, table: str, additions: Mapping[str, str]) -> list[str]:
         return ensure_columns(self.engine, table, additions)
+
+    def migrate(
+        self,
+        current: int,
+        steps: Mapping[int, Callable[[Engine], None] | None] | None = None,
+    ) -> int:
+        return migrate(self.engine, current, steps)
 
     def dispose(self) -> None:
         self.engine.dispose()

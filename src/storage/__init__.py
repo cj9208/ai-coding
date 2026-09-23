@@ -32,10 +32,14 @@ from .cache import SqliteCache
 from .fts import FtsTable, fold_cjk, match_expr, token_expr
 from .sqlite import (
     BUSY_TIMEOUT_MS,
+    SchemaTooNewError,
     SqliteClient,
     ensure_columns,
+    get_user_version,
     make_engine,
+    migrate,
     session_factory,
+    set_user_version,
     sha256_hex,
     to_db_url,
 )
@@ -43,13 +47,17 @@ from .sqlite import (
 __all__ = [
     "BUSY_TIMEOUT_MS",
     "FtsTable",
+    "SchemaTooNewError",
     "SqliteCache",
     "SqliteClient",
     "ensure_columns",
     "fold_cjk",
+    "get_user_version",
     "make_engine",
     "match_expr",
+    "migrate",
     "session_factory",
+    "set_user_version",
     "sha256_hex",
     "to_db_url",
     "token_expr",

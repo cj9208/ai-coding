@@ -1,7 +1,7 @@
 """Live end-to-end OCR test — real model, real machine. Skipped by default.
 
 Enable with ``OCR_LIVE=1`` once the local model snapshot exists
-(``data/ocr_backend/models/paddleocr-vl-1.6/``, provisioned by
+(``cache/ocr_backend/models/paddleocr-vl-1.6/``, provisioned by
 ``ocr-backend download paddleocr-vl-1.6``; see AGENTS.md). The backend resolves
 it automatically, so the test also proves that path. Uses the single-page
 verification image to keep the run short; run ``shell_scipts/verify_paddle_vl_16.py``

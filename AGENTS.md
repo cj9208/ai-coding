@@ -59,7 +59,7 @@ the others, except where noted below.
   environment issue, not a code regression.
 - `tests/test_ocr_backend/test_paddleocr_vl_live.py` runs the real OCR model
   (skipped unless `OCR_LIVE=1` and the local snapshot under
-  `data/ocr_backend/models/` is present, provisioned by
+  `cache/ocr_backend/models/` is present, provisioned by
   `ocr-backend download paddleocr-vl-1.6`); the rest of `test_ocr_backend` is
   model-free golden-fixture work.
 
@@ -79,9 +79,9 @@ are already there). Env convention lives only in
 | Path | What it is | LLM? |
 |---|---|---|
 | `src/llm_client/` | shared LLM access point (see rule above) | — it *is* the LLM layer |
-| `src/storage/` | shared storage layer, one module per DB type in use (currently SQLite: `sqlite.py` engine/PRAGMA/session/ensure_columns/sha256_hex, `fts.py` fold_cjk/match_expr/FtsTable). Only generic access knowledge belongs here — table definitions and business stores stay in each project; see `docs/storage-usage-guide.md` | no |
+| `src/storage/` | shared storage layer, one module per DB type in use (currently SQLite: `sqlite.py` engine/PRAGMA/session/ensure_columns/user_version-migrate/sha256_hex, `fts.py` fold_cjk/match_expr/FtsTable). Only generic access knowledge belongs here — table definitions and business stores stay in each project; see `docs/storage-usage-guide.md` (schema-evolution graduation rule in §4) | no |
 | `src/notify/` | shared notification layer (contract: `docs/notify-design.md`, rulings D-1..D-6 — do not re-derive): task code calls one facade `notify.emit(project, kind, **payload)` which appends a structured event to the SQLite ledger at `data/notify/events.db` and **never raises**; delivery happens only in short-lived `notify dispatch` (scheduler-launched, never a daemon), channels are pluggable adapters sharing one shape (stdout now; telegram + external ping in M1/M2, gated on `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`/`TELEGRAM_PROXY` in `.env`); "who watches the watcher" is closed at four stacked failure domains L1-L4, L4 being the human inversion "no daily digest = something is wrong" — the acknowledged limit, no VPS for it; **M0 shipped 2026-09-22** (config/events/ledger/channels/cli, 16 tests); CLI `notify emit / status / dispatch` | no |
-| `src/ocr_backend/` | shared OCR layer: one versioned `OcrDocument` contract (page → block, pixel bbox) + render projections (`page_text` / `document_markdown`); PaddleOCR-VL 1.6 is the first adapter (engine comes from the `paddle-cpu` / `paddle-gpu` extras; model snapshots live under `data/ocr_backend/models/<name>/`, provisioned by `ocr-backend download <name>` (each model is one `models.MODELS` entry, pinned to a commit sha) and resolved via `ocr_backend.models.model_dir`; see `docs/ocr-backend-design.md` §7 for the GPU index gotcha). Consumers read the contract, never a backend's native output | no |
+| `src/ocr_backend/` | shared OCR layer: one versioned `OcrDocument` contract (page → block, pixel bbox) + render projections (`page_text` / `document_markdown`); PaddleOCR-VL 1.6 is the first adapter (engine comes from the `paddle-cpu` / `paddle-gpu` extras; model snapshots live under `cache/ocr_backend/models/<name>/`, provisioned by `ocr-backend download <name>` (each model is one `models.MODELS` entry, pinned to a commit sha) and resolved via `ocr_backend.models.model_dir`; see `docs/ocr-backend-design.md` §7 for the GPU index gotcha). Consumers read the contract, never a backend's native output | no |
 | `src/ocr_review/` | human-proofreading UI for OCR output (FastAPI + Jinja + vanilla JS, no build chain, no DB, no auth — same posture as file_manager). Loads `ocr-backend parse` bundles from an inbox dir, shows PDF page rasters (PyMuPDF, rendered to the contract's exact pixel grid) with an SVG block overlay, and records fixes as a **sparse sidecar** `review.json` keyed by (page, block id) — the machine JSON is never mutated, so the ground-truth pairing survives. `patch.apply_review` folds the overlay into a corrected `OcrDocument` on export; `patch.reanchor` re-matches entries (IoU + text ratio) after a model re-run shifts ids. Workspaces under `data/ocr_review/<sha12>/`; design doc `docs/ocr-review-ui-exploration.md` | no |
 | `src/pdf_summarizer/` | CLI: PDF → chunks → map-reduce summary | yes, via `llm_client` |
 | `src/ai_market_radar/` | scans OpenAI/Anthropic/Copilot **news sources** into SQLite, digest of new items. "OpenAI" here is a watched entity, not a dependency. Deterministic parsing on purpose — no LLM | no |
@@ -100,6 +100,15 @@ are already there). Env convention lives only in
 
 - Each project owns a SQLite file under `data/<project>/` (e.g.
   `data/ai_market_radar/kb.db`; `file_manager` respects `FM_DATABASE_URL`).
+- **`data/` vs `cache/` is a contract, not a naming preference**: `data/`
+  holds assets no command can rebuild (DBs, ledgers, live recordings —
+  e.g. `data/quantdesk/recorded/`, `data/notify/events.db`, photo_desk's
+  move ledger); `cache/` holds bulk that its provisioning command rebuilds
+  (currently `cache/ocr_backend/models/` via `ocr-backend download`,
+  `cache/rag_bench/` via the bench scripts). Both are gitignored, but
+  deleting `cache/` whole is always safe while `data/` deserves a backup.
+  Anchors: `utils.paths.data_dir()` / `cache_dir()`. When a new directory
+  is born, classify it deliberately — regenerable output goes to `cache/`.
 - **Default data paths are anchored to the repo root** — the expression
   lives **once** in `src/utils/paths.py` (`REPO_ROOT`, plus
   `data_dir("<project>")`); `file_manager.config` / `research_agent.config`

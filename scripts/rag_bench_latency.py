@@ -35,7 +35,7 @@ from rag.fuse import rrf_fuse
 from rag.shape import LexicalShaper
 from rag.store import RagStore
 
-_BENCH_DATA = Path("data/rag_bench/data")
+_BENCH_DATA = Path("cache/rag_bench/data")
 
 _SAMPLE_QUERIES = [
     "公司的年假审批流程是什么",
@@ -236,7 +236,7 @@ def main() -> None:
     ap.add_argument(
         "--out",
         type=Path,
-        default=Path("data/rag_bench/latency_breakdown.json"),
+        default=Path("cache/rag_bench/latency_breakdown.json"),
         help="output file",
     )
     args = ap.parse_args()

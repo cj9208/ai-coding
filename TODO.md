@@ -57,6 +57,15 @@ the four remaining questions are recorded as resolved-as-deferred in
 
 ## Known gaps in what shipped
 
+- [ ] **No scheduler actually exists — the design's premise is still manual.**
+      notify's contract assumes `dispatch` is launched by a scheduler (never a
+      daemon), and quant record / ai-market-radar scan are background-shaped,
+      but no Windows Task Scheduler task has ever been registered — every run
+      so far was human-launched. First owner: the notify M1 wrap-up — register
+      one real `notify dispatch` task (hourly) on this machine and prove the
+      ledger fills while nobody watches; the same recipe then extends to
+      `quant record`. Until then the "silence is detected" chain (L2/L3 of
+      `docs/notify-design.md`) has never seen a real unattended cycle.
 - [ ] **ocr-review: one real mouse drag-to-add-block in a visible browser
       window.** Everything else (pixel alignment, corrected/rejected/added
       blocks, save/409, export) was verified end-to-end, but the headless

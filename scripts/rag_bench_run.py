@@ -30,8 +30,8 @@ from rag.pipeline import ingest, publish
 from rag.shape import LexicalShaper
 from rag.store import RagStore
 
-_BENCH_DATA = Path("data/rag_bench/data")
-_BENCH_INBOX = Path("data/rag_bench/inbox")
+_BENCH_DATA = Path("cache/rag_bench/data")
+_BENCH_INBOX = Path("cache/rag_bench/inbox")
 _DEFAULT_TIERS = [1_000, 10_000, 50_000]
 
 
@@ -279,7 +279,7 @@ def main() -> None:
     ap.add_argument(
         "--out",
         type=Path,
-        default=Path("data/rag_bench/results.json"),
+        default=Path("cache/rag_bench/results.json"),
         help="output results file",
     )
     args = ap.parse_args()

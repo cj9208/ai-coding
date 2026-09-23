@@ -1,5 +1,6 @@
 .venv
 data/
+cache/
 logs/
 v/
 repo-skills/
@@ -12,3 +13,4 @@ __pycache__/
 # machine-local helper; the repo-skills/ trees above are provisioned by
 # `skills sync` (src/skill_manager), so nothing else needs a script here
 /scripts/run_market_radar.sh
+.coverage

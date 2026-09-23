@@ -248,7 +248,7 @@ def test_missing_engine_reports_install_hint(monkeypatch):
 
 
 def test_repo_snapshot_is_preferred_when_present(monkeypatch, tmp_path):
-    """``model_dir=None``: the repo store (``data/ocr_backend/models/``) wins once
+    """``model_dir=None``: the repo store (``cache/ocr_backend/models/``) wins once
     the snapshot is fully downloaded; until then the engine's own cache is used."""
     monkeypatch.setattr(paddleocr_vl, "model_dir", lambda name: tmp_path / name)
 

@@ -91,6 +91,27 @@ sha256_hex(data)                # 64 位十六进制
 sha256_hex(text, length=16)
 ```
 
+### Schema 演化的两层：什么时候 ensure_columns 不够用了
+
+`ensure_columns` 只解决"加一列"。判据一句话：**改名、换语义、重建索引（比如 FTS 折叠规则变了）这三类，加列解决不了，走 `user_version` + `migrate()`**——不引入迁移框架，SQLite 文件头自带的整数戳就是全部机制。
+
+```python
+# 项目自己的 store 模块里，版本号和步骤都放项目侧（共享层只有机制）
+SCHEMA_VERSION = 1
+MIGRATIONS: dict[int, Callable[[Engine], None] | None] = {1: None}  # 基线：纯盖戳
+
+def open_store(db):
+    client = SqliteClient(db)
+    client.init_schema(Base.metadata)
+    client.migrate(SCHEMA_VERSION, MIGRATIONS)   # 太新 -> SchemaTooNewError
+    return client
+```
+
+- `{1: None}` 是接入姿势：现存的老库（戳为 0）下次打开时被基线化为 v1，行为零变化；新库建完即盖戳。**谁下次动哪个项目的 store，谁顺手接上这三行**——没有集中迁移日。
+- `steps[v]` 把 v-1 的库变成 v；每一步跑完立刻盖戳，多步中断可从断点续跑。
+- 戳比代码新（旧 checkout 开新库）抛 `SchemaTooNewError`，报错是"请更新代码"，而不是难懂的运行错误——这正是老错误现在会伪装成的样子。
+- 未来的真实迁移就是 `MIGRATIONS[2] = _v1_to_v2` 一个函数：先 `CREATE TABLE 新`、`INSERT SELECT` 搬数据、`DROP` 旧、重建索引；SQLite 不支持 rename column，改名按"新列+拷贝+弃旧列"走，`ensure_columns` 依旧在场。
+
 ## 5. 测试注入约定
 
 共享层对测试友好全靠两点：client 接受任意 URL/Path，且**不读任何环境变量**。照既有习惯注入临时库：

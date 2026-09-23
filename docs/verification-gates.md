@@ -17,7 +17,7 @@ never silently rot into "assumed passing".
                 │
    ┌────────────▼─────────────┐  push / PR (hosted, L2)   ← the cross-platform
    │ GitHub Actions CI        │  uv sync --locked → pre-commit --all-files
-   │ (ubuntu-latest, no       │  → pytest  (690 passed / live tests self-skip)
+   │ (ubuntu-latest, no       │  → pytest --cov=src  (live tests self-skip)
    │  secrets, ~70s)          │  gate: this machine is Windows, runners are Linux
    └────────────┬─────────────┘
                 │
@@ -87,8 +87,14 @@ Config: `.pre-commit-config.yaml`. Two families, and the split is deliberate:
 ## L2 — GitHub Actions CI (every push to `main`, every PR)
 
 Config: `.github/workflows/ci.yml`. One ubuntu-latest job, three steps —
-`uv sync --locked`, `pre-commit run --all-files`, `uv run pytest`. No secrets.
-Landed 2026-09-23, first run took 1m13s.
+`uv sync --locked`, `pre-commit run --all-files`, `uv run pytest --cov=src`.
+No secrets. Landed 2026-09-23, first run took 1m13s.
+
+- **Why coverage is reported but not gated:** `--cov=src --cov-report=term`
+  prints the per-module table so "which package is nearly untested" is visible
+  in every CI log (repo-wide baseline: 78%, 2026-09-23). A threshold number
+  would only train everyone to lower the bar; the report is the cheap, honest
+  version of the same question.
 
 - **Why ubuntu only, when this machine is Windows:** free quota and fast cold
   starts matter, but the real argument is that a Linux runner is a *second

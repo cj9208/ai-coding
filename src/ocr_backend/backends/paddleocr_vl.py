@@ -256,7 +256,7 @@ class PaddleOCRVLConfig:
 
     model_dir: str | Path | None = None
     """Override for the VL weights directory. ``None`` (default) prefers the
-    repo-local snapshot in ``data/ocr_backend/models/paddleocr-vl-1.6/`` when
+    repo-local snapshot in ``cache/ocr_backend/models/paddleocr-vl-1.6/`` when
     present, else the engine's official download/cache."""
 
     use_layout_detection: bool = True

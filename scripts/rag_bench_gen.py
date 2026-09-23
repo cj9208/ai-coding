@@ -8,8 +8,8 @@ match on.
 
 Usage::
 
-    uv run python scripts/rag_bench_gen.py --n-docs 1000 --out data/rag_bench/inbox
-    uv run python scripts/rag_bench_gen.py --n-docs 50000 --out data/rag_bench/inbox
+    uv run python scripts/rag_bench_gen.py --n-docs 1000 --out cache/rag_bench/inbox
+    uv run python scripts/rag_bench_gen.py --n-docs 50000 --out cache/rag_bench/inbox
 """
 
 from __future__ import annotations
@@ -432,7 +432,7 @@ def main() -> None:
     ap.add_argument(
         "--out",
         type=Path,
-        default=Path("data/rag_bench/inbox"),
+        default=Path("cache/rag_bench/inbox"),
         help="output inbox directory",
     )
     ap.add_argument("--pages", type=int, default=10, help="pages per document")
