@@ -30,6 +30,10 @@ repos:
         entry: uv run mypy
         language: system
         types: [python]
+        # pre-commit batches files into parallel mypy processes sharing one
+        # .mypy_cache — that race crashes CI intermittently (INTERNAL ERROR,
+        # seen 2026-09-23 on ubuntu-latest, same tree green on rerun-able runs)
+        require_serial: true
       - id: bandit
         name: bandit
         entry: uv run bandit --skip B101 --exclude tests
