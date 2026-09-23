@@ -2,24 +2,29 @@
 
     notify emit quantdesk record.batch --severity info rows=240 stream=x
     notify status [--project P] [--recent 20]
-    notify dispatch [--channels stdout,telegram]
+    notify dispatch [--channels stdout,telegram] [--limit 500]
+    notify check [--send]
 
-``dispatch`` is a short-lived process a scheduler launches every few minutes
-(D-5): it reads events not yet sent to each enabled channel, delivers, and
-marks the outcome. M0 has no throttling yet (policy.py is M1) — everything
-goes straight to the channels, alert-first. Delivery *failures* still exit 0
-by design: escalating them into an alert is M1's job; a non-zero exit here
-means the invocation itself was wrong (unknown channel, bad payload).
+``dispatch`` is the short-lived process a scheduler launches every few minutes
+(§1: no daemon), and one invocation walks §4 in order: rules turn a silence into an
+alert on the ledger (§4.5), policy decides per channel what actually goes out
+(§4.4), delivery marks the outcome, and whatever could not be delivered
+becomes a self-alert for the next round. Delivery *failures* still exit 0 —
+the failure is now a ledger row, which is the layer's whole point; a non-zero
+exit means the invocation itself was wrong (unknown channel, bad payload,
+unreadable rules file).
 """
 
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import click
 
-from . import channels, config, ledger
+from . import channels, config, ledger, policy, rules
+from .events import Event, Severity
 from .events import emit as emit_event
 
 #: emit's named kwargs — a payload key of the same name is ambiguous, so the
@@ -102,30 +107,184 @@ def status(project: str | None, recent: int) -> None:
 )
 @click.option("--limit", type=int, default=500, help="max events per channel")
 def dispatch(channel_list: str | None, limit: int) -> None:
-    """deliver pending events to enabled channels"""
+    """run the rules, then deliver pending alerts to each channel"""
     names = (
         [c.strip() for c in channel_list.split(",") if c.strip()]
         if channel_list
         else config.enabled_channels()
     )
     led = ledger.default()
+    _run_rules(led)
+
+    known: dict[int, Event] = {}
+    failed_on: dict[int, set[str]] = {}
+    last_error: dict[int, str] = {}
+    stuck: dict[int, Event] = {}
+
     for name in names:
         try:
             channel = channels.build(name)
         except channels.ChannelError as exc:
             raise click.ClickException(f"notify: {exc}") from exc
+        pending = led.pending_for(name, limit=limit)
+        for event in pending:
+            known[event.id] = event
+        decision = policy.plan(
+            pending,
+            last_sent=led.last_sent_by_key(name),
+            attempts=led.attempts(name, [e.id for e in pending]),
+        )
         sent = failed = 0
-        for event in led.pending_for(name, limit=limit):
+        for item in decision.deliveries:
             try:
-                channel.send(event)
-                led.mark_delivery(event.id, name, "sent")
-                sent += 1
+                channel.send(item.event)
             except Exception as exc:  # noqa: BLE001 — recorded, not fatal
-                led.mark_delivery(event.id, name, "failed", str(exc))
-                failed += 1
-        click.echo(f"{name}: sent {sent}, failed {failed}")
-    # failed > 0 still exits 0: escalating it into a delivery.failed alert
-    # is policy.py's M1 job, not this wiring's.
+                for event_id in item.folded:
+                    led.mark_delivery(event_id, name, "failed", str(exc))
+                    failed_on.setdefault(event_id, set()).add(name)
+                    last_error[event_id] = str(exc)
+                    failed += 1
+            else:
+                note = (
+                    ""
+                    if item.reason == "first"
+                    else f"merged {len(item.folded)} events into one notice"
+                )
+                for event_id in item.folded:
+                    led.mark_delivery(event_id, name, "sent", note)
+                    sent += 1
+        for event in decision.stuck:
+            stuck[event.id] = event
+        click.echo(
+            f"{name}: messages {len(decision.deliveries)}, sent {sent}, failed {failed}"
+        )
+
+    _escalate(led, names, known, failed_on, last_error, stuck)
+
+
+@cli.command()
+@click.option(
+    "--send",
+    "do_send",
+    is_flag=True,
+    help="fire one live probe message through every enabled channel",
+)
+def check(do_send: bool) -> None:
+    """validate config, dry-run the rules, optionally probe the wire"""
+    led = ledger.default()
+    click.echo(f"ledger    {config.db_path()} ({led.total()} events)")
+    names = config.enabled_channels()
+    click.echo(f"channels  {', '.join(names) if names else '(none enabled)'}")
+    for name in names:
+        if name not in channels.names():
+            raise click.ClickException(
+                f"unknown channel '{name}' (available: {', '.join(channels.names())})"
+            )
+
+    path = config.expectations_path()
+    try:
+        expectations = rules.load(path)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"notify: {exc}") from exc
+    click.echo(f"rules     {path} ({len(expectations)} declared)")
+    for rule in expectations:
+        state = "on " if rule.enabled else "off"
+        click.echo(f"  [{state}] {rule.project}.{rule.kind} > {rule.max_silence}")
+    due = rules.evaluate(expectations, led.last_seen(), led.last_event_ts_by_key())
+    click.echo(
+        f"  firing now: {len(due)}" + ("" if due else " (dry run, nothing emitted)")
+    )
+    for event in due:
+        click.echo("    " + channels.render(event))
+
+    if not do_send:
+        return
+    probe = Event.new(
+        "notify", "check", severity=Severity.WARN, payload={"probe": True}
+    )
+    for name in names:
+        try:
+            channel = channels.build(name)
+            channel.send(probe)
+        except Exception as exc:  # noqa: BLE001 — a probe reports, never aborts
+            click.echo(f"probe {name}: FAILED — {exc}")
+        else:
+            click.echo(f"probe {name}: ok")
+
+
+def _run_rules(led: ledger.Ledger) -> None:
+    """§4.5: a silence becomes an alert here, emitted by notify itself."""
+    path = config.expectations_path()
+    try:
+        expectations = rules.load(path)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"notify: cannot use {path}: {exc}") from exc
+    if not expectations:
+        return
+    due = rules.evaluate(expectations, led.last_seen(), led.last_event_ts_by_key())
+    for event in due:
+        led.insert(event)
+    if due:
+        keys = ", ".join(e.dedup_key for e in due)
+        click.echo(f"rules: emitted {len(due)} silence alert(s): {keys}")
+
+
+def _escalate(
+    led: ledger.Ledger,
+    names: list[str],
+    known: dict[int, Event],
+    failed_on: dict[int, set[str]],
+    last_error: dict[int, str],
+    stuck: dict[int, Event],
+) -> None:
+    """§4.4's bootstrap exception: notify alerting on its own dead channel.
+
+    Two triggers — an event that failed on *every* enabled channel this round,
+    or one that has failed ``MAX_ATTEMPTS`` rounds running. The resulting
+    self-alert is emitted at the *end* of dispatch, so it goes out on the next
+    round over all channels, and it is throttled like any other dedup_key so a
+    channel that stays down for a day is one message an hour, not 288.
+    """
+    every_channel = set(names)
+    hopeless = {
+        event_id
+        for event_id, failed_channels in failed_on.items()
+        if every_channel and failed_channels >= every_channel
+    }
+    offenders = [
+        known[event_id]
+        for event_id in sorted(hopeless | set(stuck))
+        if event_id in known
+    ]
+    offenders = [
+        e
+        for e in offenders
+        if e.severity in policy.ESCALATE_SEVERITIES and not policy.is_self_alert(e)
+    ]
+    if not offenders:
+        return
+
+    already = led.last_event_ts_by_key().get(policy.SELF_DEDUP_KEY)
+    now = datetime.now(timezone.utc)
+    if policy.within_window(already, now, policy.THROTTLE_WINDOW):
+        click.echo(
+            f"escalation throttled: {len(offenders)} undeliverable event(s)"
+            " already reported this window"
+        )
+        return
+
+    ids = [e.id for e in offenders]
+    emit_event(
+        policy.SELF_PROJECT,
+        policy.SELF_KIND,
+        severity=Severity.ALERT,
+        dedup_key=policy.SELF_DEDUP_KEY,
+        undeliverable=len(offenders),
+        event_ids=ids,
+        channels=list(names),
+        last_error=last_error.get(ids[0], "")[:200],
+    )
+    click.echo(f"escalated: {policy.SELF_DEDUP_KEY} for event(s) {ids}")
 
 
 def _parse_pair(raw: str) -> tuple[str, Any]:

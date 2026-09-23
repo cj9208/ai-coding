@@ -15,12 +15,12 @@ import json
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Engine
 
-from storage.sqlite import make_engine, to_db_url
+from storage.sqlite import ensure_columns, make_engine, migrate, to_db_url
 
 from . import config
 from .events import Event, Severity
@@ -44,9 +44,21 @@ CREATE TABLE IF NOT EXISTS deliveries (
         CHECK (status IN ('pending', 'sent', 'failed', 'suppressed')),
     detail   TEXT NOT NULL DEFAULT '',
     at       TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (event_id, channel)
 );
 """
+
+#: M0 ledgers predate the attempts counter. Adding a column is the first tier
+#: of docs/storage-usage-guide.md §4's two — no rebuild, no rename, so
+#: ensure_columns is enough and it stays idempotent across opens.
+_ADDITIONS = {"deliveries": {"attempts": "INTEGER NOT NULL DEFAULT 0"}}
+
+#: the stamp baseline is the second tier, adopted here because this change is
+#: what touched the store (the guide's "whoever opens it wires it" rule).
+#: v1 = the M1 shape: deliveries.attempts present.
+SCHEMA_VERSION = 1
+MIGRATIONS: dict[int, Callable[[Engine], None] | None] = {1: None}
 
 _INSERT_EVENT = text(
     "INSERT INTO events (ts, project, kind, severity, dedup_key, payload)"
@@ -56,6 +68,10 @@ _INSERT_EVENT = text(
 # alert first, then warn, then info; FIFO within a severity (§4.4).
 # The CASE ranks mirror events.SEVERITY_RANK — test_pending_is_alert_first
 # in tests/test_notify/test_ledger.py is the guard against drift.
+#
+# The severity filter is what keeps info out of the immediate-delivery path
+# (§4.4: info waits for the digest) without a second query shape; an info
+# event carrying payload {"urgent": true} is the documented escape hatch.
 _SELECT_PENDING = text("""
     SELECT e.id, e.ts, e.project, e.kind, e.severity, e.dedup_key, e.payload
     FROM events e
@@ -63,10 +79,24 @@ _SELECT_PENDING = text("""
         SELECT 1 FROM deliveries d
         WHERE d.event_id = e.id AND d.channel = :channel AND d.status = 'sent'
     )
+    AND (e.severity IN :severities
+         OR json_extract(e.payload, '$.urgent') = true)
     ORDER BY CASE e.severity WHEN 'alert' THEN 0 WHEN 'warn' THEN 1
                              WHEN 'info' THEN 2 ELSE 9 END, e.ts
     LIMIT :limit
+    """).bindparams(bindparam("severities", expanding=True))
+
+_LAST_SENT_BY_KEY = text("""
+    SELECT e.dedup_key AS dedup_key, MAX(d.at) AS last_at
+    FROM deliveries d JOIN events e ON e.id = d.event_id
+    WHERE d.channel = :channel AND d.status = 'sent'
+    GROUP BY e.dedup_key
     """)
+
+_ATTEMPTS = text("""
+    SELECT event_id, attempts FROM deliveries
+    WHERE channel = :channel AND event_id IN :ids
+    """).bindparams(bindparam("ids", expanding=True))
 
 _SUMMARY_ALL = text("""
     SELECT project, kind, severity, COUNT(*) AS n, MAX(ts) AS last_ts
@@ -84,12 +114,17 @@ _SUMMARY_BY_PROJECT = text("""
     """)
 
 _UPSERT_DELIVERY = text("""
-    INSERT INTO deliveries (event_id, channel, status, detail, at)
-    VALUES (:event_id, :channel, :status, :detail, :at)
+    INSERT INTO deliveries (event_id, channel, status, detail, at, attempts)
+    VALUES (:event_id, :channel, :status, :detail, :at,
+            CASE WHEN :status = 'failed' THEN 1 ELSE 0 END)
     ON CONFLICT (event_id, channel)
     DO UPDATE SET status = excluded.status,
                   detail = excluded.detail,
-                  at = excluded.at
+                  at = excluded.at,
+                  attempts = CASE excluded.status
+                      WHEN 'failed' THEN deliveries.attempts + 1
+                      WHEN 'sent' THEN 0
+                      ELSE deliveries.attempts END
     """)
 
 
@@ -114,6 +149,9 @@ class Ledger:
             for statement in _SCHEMA.split(";"):
                 if statement.strip():
                     conn.execute(text(statement))
+        for table, additions in _ADDITIONS.items():
+            ensure_columns(self._engine, table, additions)
+        migrate(self._engine, SCHEMA_VERSION, MIGRATIONS)
 
     # -- write side -----------------------------------------------------
 
@@ -161,11 +199,66 @@ class Ledger:
 
     # -- read side --------------------------------------------------------
 
-    def pending_for(self, channel: str, limit: int = 500) -> list[Event]:
-        """Events not yet ``sent`` to this channel, alert-first."""
+    def pending_for(
+        self,
+        channel: str,
+        limit: int = 500,
+        severities: Sequence[str] = ("alert", "warn"),
+    ) -> list[Event]:
+        """Events not yet ``sent`` to this channel, alert-first.
+
+        ``info`` is deliberately outside the default set: it waits for the
+        digest (§4.4). An info event with payload ``{"urgent": true}`` still
+        comes through — see _SELECT_PENDING.
+        """
         with self._engine.connect() as conn:
-            rows = conn.execute(_SELECT_PENDING, {"channel": channel, "limit": limit})
+            rows = conn.execute(
+                _SELECT_PENDING,
+                {"channel": channel, "limit": limit, "severities": list(severities)},
+            )
             return [_row_to_event(dict(m)) for m in rows.mappings()]
+
+    def last_sent_by_key(self, channel: str) -> dict[str, str]:
+        """``dedup_key -> ts`` of the newest sent delivery — policy's throttle
+        input (§4.4: the first of a key always goes out, repeats merge)."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(_LAST_SENT_BY_KEY, {"channel": channel})
+            return {str(r["dedup_key"]): str(r["last_at"]) for r in rows.mappings()}
+
+    def attempts(self, channel: str, event_ids: Sequence[int]) -> dict[int, int]:
+        """Failed-attempt counts per event, for the escalation rule (§4.4)."""
+        if not event_ids:
+            return {}
+        with self._engine.connect() as conn:
+            rows = conn.execute(_ATTEMPTS, {"channel": channel, "ids": list(event_ids)})
+            return {int(r["event_id"]): int(r["attempts"]) for r in rows.mappings()}
+
+    def last_seen(self) -> dict[tuple[str, str], str]:
+        """``(project, kind) -> newest ts`` across all severities — what
+        :mod:`notify.rules` measures silence against (§4.5)."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT project, kind, MAX(ts) AS last_ts FROM events"
+                    " GROUP BY project, kind"
+                )
+            )
+            return {
+                (str(r["project"]), str(r["kind"])): str(r["last_ts"])
+                for r in rows.mappings()
+            }
+
+    def last_event_ts_by_key(self) -> dict[str, str]:
+        """``dedup_key -> newest ts`` of *emitted* events (not deliveries).
+        The other half of rule idempotence: a silence alert already on the
+        ledger inside the throttle window is not emitted again (§4.5)."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT dedup_key, MAX(ts) AS last_ts FROM events GROUP BY dedup_key"
+                )
+            )
+            return {str(r["dedup_key"]): str(r["last_ts"]) for r in rows.mappings()}
 
     def summary(
         self, project: str | None = None

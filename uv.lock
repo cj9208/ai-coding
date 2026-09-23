@@ -24,6 +24,7 @@ name = "ai-coding"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "fastapi" },
     { name = "feedparser" },
     { name = "httpx" },
@@ -42,6 +43,7 @@ dependencies = [
     { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
     { name = "streamlit" },
     { name = "tenacity" },
@@ -78,6 +80,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click", specifier = ">=8.3.1" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "feedparser", specifier = ">=6.0.14" },
     { name = "httpx", specifier = ">=0.28.1" },
@@ -100,6 +103,7 @@ requires-dist = [
     { name = "python-docx", specifier = ">=1.1" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "streamlit", specifier = ">=1.55.0" },
     { name = "tenacity", specifier = ">=9.0.0" },

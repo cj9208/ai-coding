@@ -137,6 +137,7 @@ owner row in `TODO.md` so "not yet verified" stays a debt, not a myth:
 | Docker OCR runner | `ocr-backend container build\|download\|parse [--gpu]` on a Docker Desktop host | **never verified end-to-end** — unit tests fake `subprocess.run`; TODO.md |
 | photo_desk HEIC + NAS | real device tree mounted at `PHOTO_ROOT` | acceptance debt recorded in TODO.md (both M0 and M1 lines) |
 | quantdesk WS recording | a network where fstream actually pushes | live-verified gap: this machine's WS is silent; liquidation *positive* path awaits TODO.md |
+| notify Telegram delivery | real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, then `uv run notify emit … --severity alert && uv run notify dispatch` | **verified 2026-09-23** — four acceptance items on a real phone, evidence table in `docs/notify-design.md` §5; owed: one *unattended* round (no scheduler registered yet, TODO.md) |
 | skill sync reproducibility | `uv run skills sync` on a deleted clone | verified: clone returned at its pin; keep as the check whenever UPSTREAMS changes |
 
 The rule that keeps this layer honest: **a connectivity that *pretends* to
@@ -162,8 +163,11 @@ session inherits a verdict instead of re-deriving one:
   result you can reproduce byte-for-byte is what stops p-hacking-by-retry.
 - **Golden JSONL fixtures** — `tests/golden/photo_groups.jsonl` locks the
   burst-grouping rules (the only spec of the 3-level rule), `tests/golden/rag_sample.jsonl`
-  the rag contract. Unlike L1–L3 these don't *check* new code; they *are* the
-  behaviour, in a diffable form.
+  the rag contract, and `tests/golden/notify_policy.jsonl` the eight delivery
+  decisions of §4.4 (first-of-key, 5→2 inside a window, window expiry,
+  per-key streams, urgent info, 3-strikes stuck) — so "what counts as spam" is
+  a diff, not a memory. Unlike L1–L3 these don't *check* new code; they *are*
+  the behaviour, in a diffable form.
 - **Evidence trail scripts** — `scripts/verify_paddle_vl_16.py` is the raw
   investigation output behind `docs/ocr-backend-design.md` §5.3; kept
   deliberately so a doc claim can be re-derived. Machine-local helpers in
@@ -193,6 +197,7 @@ uv run pytest                                     # L2's real check, locally
 uv run pytest tests/test_photo_desk -q            # one subsystem
 OCR_LIVE=1 uv run pytest tests/test_ocr_backend/test_paddleocr_vl_live.py   # L3
 LLM_API_KEY=... uv run pytest tests/test_pdf_summarizer -q                   # L3
+uv run notify check --send                        # L3: dry-run rules + probe every channel
 uv run orchestrate golden run                     # L4 re-check
 gh run list / gh run watch <id>                   # L2 hosted runs
 ```

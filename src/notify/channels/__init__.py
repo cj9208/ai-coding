@@ -1,9 +1,9 @@
 """Channel adapters — one registry entry each (design §3, D-3).
 
 Every channel is the same shape: "take a rendered event, fire one delivery,
-raise :class:`ChannelError` on failure". The telegram and ping adapters of
-M1/M2 add a class and a registry line beside ``stdout`` — dispatch, ledger
-and task code never change.
+raise :class:`ChannelError` on failure". ``telegram`` is the proof that the
+shape holds — it arrived without a single change to dispatch, the ledger or
+any emitter. The ping adapter of M2 is one more line here.
 """
 
 from __future__ import annotations
@@ -12,8 +12,12 @@ from typing import Mapping
 
 from .base import Channel, ChannelError, render
 from .stdout import StdoutChannel
+from .telegram import TelegramChannel
 
-_REGISTRY: Mapping[str, type[Channel]] = {"stdout": StdoutChannel}
+_REGISTRY: Mapping[str, type[Channel]] = {
+    "stdout": StdoutChannel,
+    "telegram": TelegramChannel,
+}
 
 
 def build(name: str) -> Channel:
