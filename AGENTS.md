@@ -137,7 +137,7 @@ are already there). Env convention lives only in
   maps host paths under `data/ocr_backend/{in,out}` to the container's
   `/work/{in,out}` mounts — a file outside those directories is rejected with
   a clear error instead of a silent Docker failure.
-- The runner mounts `data/ocr_backend/{models,in,out}` — models stay outside
+- The runner mounts `cache/ocr_backend/models` and `data/ocr_backend/{in,out}` — models stay outside
   the image (bind-mounted at the container's `REPO_ROOT`-anchored default
   path), inputs are read-only, results land in `out/` and survive `--rm`.
 - Rationale (why a runner, not an HTTP service, and why CPU/GPU are separate
@@ -167,6 +167,11 @@ are already there). Env convention lives only in
 - Tests mirror the source layout: `tests/test_<project>/test_<module>.py`.
 - Commit messages: short, lowercase, imperative ("add file manager with
   graded metadata search"); mention the *why* in the body when non-obvious.
+- **main is protected** (required `check`, enforced for admins, no force-push
+  or deletion, since 2026-09-23): every task starts on its own branch
+  (`git checkout -b <task>`), pushes, and opens a PR (`gh pr create`);
+  it merges only after CI is green. Concurrent sessions collide on one
+  working tree otherwise — the PR is where conflicts become visible.
 
 ## AI skills & specs
 
