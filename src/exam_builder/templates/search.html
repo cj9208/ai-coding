@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<form method="get" action="/search" class="bar">
+  <input name="q" value="{{ q }}" placeholder="关键词(题干全文检索)">
+  <select name="chapter">
+    <option value="">全部章</option>
+    {% for c in chapters %}<option value="{{ c }}" {% if c==chapter %}selected{% endif %}>{{ c }}</option>{% endfor %}
+  </select>
+  <input name="section" value="{{ section }}" placeholder="节 如 13.2.1">
+  <input name="lesson" value="{{ lesson }}" placeholder="课时 如 第1课时">
+  <button type="submit">搜索</button>
+</form>
+
+{% if not cards %}<p class="muted">没有匹配的题目。</p>{% endif %}
+{% for card in cards %}
+<article class="qcard">
+  <label class="pick"><input type="checkbox" class="sel" data-id="{{ card.q.id }}"></label>
+  <div class="qbody">
+    <div class="qmeta">#{{ card.q.id }} · {{ card.doc.section or card.doc.chapter }} {{ card.doc.lesson }} · {{ card.doc.title }}
+      {% if card.q.n_figure %}<span class="badge">图×{{ card.q.n_figure }}</span>{% endif %}
+      {% if card.q.n_formula %}<span class="badge">公式×{{ card.q.n_formula }}</span>{% endif %}
+    </div>
+    {% for line in card.lines %}<p>{{ line }}</p>{% endfor %}
+    {% if card.thumb %}<img class="thumb" src="/media/{{ card.thumb.sha }}.{{ card.thumb.ext }}" alt="题图">{% endif %}
+  </div>
+</article>
+{% endfor %}
+{% endblock %}

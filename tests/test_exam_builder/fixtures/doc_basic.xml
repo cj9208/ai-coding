@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:o="urn:schemas-microsoft-com:office:office"
+            xmlns:v="urn:schemas-microsoft-com:vml">
+  <w:body>
+    <w:p><w:r><w:t>同步练习</w:t></w:r></w:p>
+    <w:tbl>
+      <w:tr><w:tc><w:p><w:r><w:t>课程基本信息</w:t></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc><w:p><w:r><w:t>课题</w:t></w:r></w:p><w:p><w:r><w:t>13.2.1　三角形的边</w:t></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc>
+        <w:p><w:r><w:t>同步练习题目</w:t></w:r></w:p>
+        <w:p><w:r><w:t>1．五条线段的长分别为1 cm，2 cm，可以构成</w:t></w:r><w:r><w:object><o:OLEObject r:id="rId9"/></w:object></w:r><w:r><w:t>个三角形．</w:t></w:r></w:p>
+        <w:p><w:r><w:t>2．三角形的三边长分别为2，7，a，则a的取值范围是</w:t></w:r><w:r><w:drawing><a:blip r:embed="rId8"/></w:drawing></w:r><w:r><w:t>．</w:t></w:r></w:p>
+        <w:p><w:r><w:t>3．（1）如果等腰三角形的一边长是5，求它的周长．</w:t></w:r></w:p>
+        <w:p><w:r><w:t>（2）如果等腰三角形的一边长是8，周长为36．</w:t></w:r></w:p>
+      </w:tc></w:tr>
+      <w:tr><w:tc>
+        <w:p><w:r><w:t>同步练习答案</w:t></w:r></w:p>
+        <w:p><w:r><w:t>1．3．</w:t></w:r></w:p>
+        <w:p><w:r><w:t>2．5＜a＜9．</w:t></w:r></w:p>
+        <w:p><w:r><w:t>3．（1）周长为18．</w:t></w:r></w:p>
+        <w:p><w:r><w:t>（2）另两边为14，14．</w:t></w:r></w:p>
+      </w:tc></w:tr>
+    </w:tbl>
+    <w:sectPr/>
+  </w:body>
+</w:document>

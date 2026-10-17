@@ -100,6 +100,20 @@ the four remaining questions are recorded as resolved-as-deferred in
       confirmed readable, so on-device bursts currently lean on the
       EXIF-millisecond rule — verify it actually fires on iPhone bursts.
 
+- [ ] **exam_builder: open one composed paper in real Word.** M0+M1 shipped
+      2026-10-17 and package integrity is machine-checked (every `r:embed`/`r:id`
+      resolves to a part that exists, OLE `.bin` + WMF preview copied, zip
+      clean, python-docx opens it), but nothing has proven Word *renders* it:
+      double-click a MathType formula and confirm it is still editable OLE, and
+      confirm geometry PNGs sit at the right size/anchor. Recipe:
+      `uv run exam ingest <dir> && uv run exam serve`, pick a few 含公式/含图
+      questions in `/search`, 组卷, open the downloaded `.docx`.
+      Two known debts ride along: the 2 legacy `.doc` files in the corpus stay
+      `status=error` until M2 conversion, and formulas are by ruling D-3
+      neither rendered nor searchable in the browser (〔公式〕 placeholder +
+      badge only) — so "does the formula look right" can only be answered in
+      Word, not in `/search`.
+
 ## Next, if the demand is real
 
 - [ ] **Shared-layer adoption ruling (`task_queue`, `storage.migrate`).** Both

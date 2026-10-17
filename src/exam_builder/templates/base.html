@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}组卷{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav>
+  <a href="/docs">文档</a>
+  <a href="/search">搜索</a>
+  <span class="spacer"></span>
+  <span id="tray">已选 <b id="tray-n">0</b></span>
+  <button id="tray-go" type="button">组卷 →</button>
+  <button id="tray-clear" type="button">清空</button>
+</nav>
+<main>{% block content %}{% endblock %}</main>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

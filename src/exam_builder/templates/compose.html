@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>组卷</h2>
+<form method="post" action="/compose" id="compose-form">
+  <input type="hidden" name="ids" id="ids-input" value="{{ ids }}">
+  <label>试卷标题 <input name="title" placeholder="如 八年级上 三角形 专项"></label>
+  <ol id="pick-list">
+    {% for item in items %}
+    <li data-id="{{ item.q.id }}">
+      <span class="handle">⋮⋮</span>
+      <span class="qtext">{{ item.lines[0] if item.lines else '' }}</span>
+      <button type="button" class="mv" data-dir="-1">↑</button>
+      <button type="button" class="mv" data-dir="1">↓</button>
+      <button type="button" class="rm">移除</button>
+    </li>
+    {% endfor %}
+  </ol>
+  <button type="submit">生成 .docx</button>
+</form>
+{% endblock %}
+{% block scripts %}<script src="/static/compose.js"></script>{% endblock %}
