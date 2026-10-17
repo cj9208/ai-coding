@@ -1,5 +1,6 @@
 """Tests for llm_client.rate_limit — TokenBucket and RateLimiter."""
 
+import asyncio
 import time
 
 import pytest
@@ -88,3 +89,25 @@ async def test_rate_limiter_enforces_limit():
     assert elapsed >= 0.8
 
     await limiter.stop()
+
+
+async def test_token_bucket_caps_idle_accumulation():
+    """An idle bucket must not bank more than max_burst tokens.
+
+    Regression: release() was uncapped, so idling banked one token per refill
+    forever — 10 min idle at rpm=60 unleashed a 600-request instant burst,
+    defeating the limiter's whole purpose.
+    """
+    bucket = TokenBucket(rpm=600, max_burst=2)  # refills 10/s
+    await bucket.start()
+
+    # ~5 refills fire in 0.5s; an uncapped bucket would bank ~5 tokens.
+    await asyncio.sleep(0.5)
+    assert bucket._tokens == 2  # held at max_burst regardless of idle time
+
+    await bucket.stop()
+
+
+async def test_token_bucket_invalid_max_burst():
+    with pytest.raises(ValueError, match="max_burst must be >= 1"):
+        TokenBucket(rpm=60, max_burst=0)

@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 _SHUTDOWN = object()
 
+# Exponential backoff bounds for re-queueing a failed task. Without a delay a
+# rate-limited lane hot-loops, re-running the same failing task back-to-back.
+_RETRY_BACKOFF_BASE = 0.1
+_RETRY_BACKOFF_CAP = 5.0
+
 TaskFn = Callable[..., Awaitable[Any]]
 
 
@@ -207,7 +212,19 @@ class TaskQueue:
             except Exception as exc:
                 if task.retries < task.max_retries:
                     task.retries += 1
+                    # Back off, then re-queue. put() runs before task_done() so
+                    # the unfinished-task count never transiently drops to zero
+                    # (which would wake join() early); task_done() then accounts
+                    # for the get() that pulled this attempt, fixing a
+                    # +1-per-retry leak that made join() hang forever.
+                    await asyncio.sleep(
+                        min(
+                            _RETRY_BACKOFF_BASE * 2 ** (task.retries - 1),
+                            _RETRY_BACKOFF_CAP,
+                        )
+                    )
                     await lane_obj.queue.put(task)
+                    lane_obj.queue.task_done()
                     lane_obj.stats.pending = lane_obj.queue.qsize()
                     logger.debug(
                         "Task in lane %r failed (retry %d/%d): %s",
