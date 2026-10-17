@@ -2,7 +2,7 @@
 
 > 一句话核心：`src/task_queue` 是通用异步任务调度层——分 lane 的任务队列管"谁先做、能做几个"，LLMClient 内的 token bucket 管"下游不能打爆"。两层各管各的，通过背压自然串联。装饰器是非侵入的接入方式：业务函数不变，`@queued` 只改变调度方式。
 
-日期：2026-09-21。状态：**设计阶段，尚未实现**。
+日期：2026-09-21。状态：**已实现**（`src/task_queue/`：`service.py` 分 lane 队列 + `llm_client/rate_limit.py` token bucket，22 测试）。采用现状（2026-10-17 核对）：唯一生产消费者是 `rag/enrich.py`，且它**直接构造 `TaskQueue`** 提交任务——`decorators.py` 的 `@queued` 装饰器目前**零生产消费者**；下文点名的 pdf_summarizer（仍手搓 `Semaphore`）与 research_agent（仍串行）尚未接入。是否推广见 TODO 的共享层采用裁决。
 
 ## 1. 背景：为什么需要这个层
 

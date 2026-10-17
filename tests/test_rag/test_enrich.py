@@ -240,3 +240,45 @@ def test_enricher_runs_concurrently(store: RagStore) -> None:
 
     assert client.calls == 6
     assert client.peak > 1  # actually concurrent, not serial
+
+
+def test_enrich_corpus_refreshes_fts_on_partial_failure(built, monkeypatch) -> None:
+    """A failing chunk must not strand the successful docs' inferred rows out
+    of the FTS index.
+
+    Regression: the refresh used to be gated on ``not errors``, so any single
+    chunk failure left every successfully-written ``inferred`` row invisible to
+    search until a fully-clean re-run.
+    """
+    from rag.enrich import enrich_corpus
+
+    store, _ = built
+    pending = store.unenriched_child_chunk_ids(PROMPT_VER)
+    assert len(pending) >= 2
+
+    class PartialFakeClient:
+        """Fails permanently for the first chunk it sees (so the failure
+        survives the queue's retries), succeeds for every other chunk."""
+
+        def __init__(self) -> None:
+            self.doomed: str | None = None
+
+        async def chat_json(
+            self, prompt, system_prompt="", *, schema=None, model=None, temperature=None
+        ):
+            if self.doomed is None:
+                self.doomed = prompt
+            if prompt == self.doomed:
+                raise RuntimeError("permanent failure for this chunk")
+            return schema.model_validate(
+                {"title": "T", "keywords": ["k"], "summary": "s"}
+            )
+
+    monkeypatch.setattr("rag.enrich.get_client", lambda: PartialFakeClient())
+
+    result = enrich_corpus("unused", store=store, prompt_ver=PROMPT_VER)
+
+    assert result["errors"], "injected failure should surface"
+    assert result["enriched"] >= 1
+    # The fix: docs are refreshed despite partial errors (old code returned 0).
+    assert result["docs_refreshed"] > 0

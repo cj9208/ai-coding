@@ -267,9 +267,11 @@ def enrich_corpus(
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")
 
-    docs_refreshed = 0
-    if not errors:
-        docs_refreshed = store.refresh_fts_for_docs(doc_ids, fp)
+    # Refresh FTS for every affected doc even under partial errors: the
+    # enricher writes each successful chunk's inferred row before the batch
+    # ends, so gating the refresh on zero errors stranded those rows out of
+    # search until a fully-clean re-run.
+    docs_refreshed = store.refresh_fts_for_docs(doc_ids, fp)
 
     return {
         "prompt_ver": prompt_ver,

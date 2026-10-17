@@ -29,11 +29,17 @@ class TokenBucket:
         await bucket.stop()       # stop the refill task
     """
 
-    def __init__(self, rpm: int) -> None:
+    def __init__(self, rpm: int, max_burst: int | None = None) -> None:
         if rpm < 1:
             raise ValueError("rpm must be >= 1")
         self.rpm = rpm
+        # Cap banked tokens so an idle bucket can't unleash a burst that
+        # defeats the limiter; default to ~1 second of traffic.
+        self.max_burst = max_burst if max_burst is not None else max(1, rpm // 60)
+        if self.max_burst < 1:
+            raise ValueError("max_burst must be >= 1")
         self._semaphore = asyncio.Semaphore(0)
+        self._tokens = 0
         self._refiller: asyncio.Task[None] | None = None
         self._started = False
 
@@ -61,11 +67,14 @@ class TokenBucket:
     async def _refill_loop(self, interval: float) -> None:
         while True:
             await asyncio.sleep(interval)
-            self._semaphore.release()
+            if self._tokens < self.max_burst:
+                self._tokens += 1
+                self._semaphore.release()
 
     async def acquire(self) -> None:
         """Wait until a token is available, then consume it."""
         await self._semaphore.acquire()
+        self._tokens -= 1
 
 
 class RateLimiter:

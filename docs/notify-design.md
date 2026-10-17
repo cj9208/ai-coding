@@ -72,10 +72,10 @@
 | `ledger.py` | SQLite 两张表的读写（复用 `storage.sqlite` 的 engine/PRAGMA），投递状态推进 |
 | `rules.py` | 期望规则评估：给定账本 + `expectations.yaml`，产出应生成而未生成的 alert 事件（§4.5） |
 | `policy.py` | 纯函数：一批待发事件 → 节流/合并/优先级排序后的投递计划（§4.4），规则改动过 golden |
-| `channels/` | `base.py` 适配器接口 + `stdout.py` / `telegram.py` / `ping.py` |
+| `channels/` | `base.py` 适配器接口 + `stdout.py` / `telegram.py`（已实现）/ `ping.py`（**M2，未实现**） |
 | `schedule.py` | 把"谁来拉起 dispatch"包成一个命令：构造/注册/查询/删除计划任务，路径全部由 `REPO_ROOT` 推导（§4.9）；只 shell 到系统调度器，不做常驻 |
-| `digest.py` | 从账本聚合渲染日摘要文本（投影，不改变账本） |
-| `cli.py` | `notify emit / status / dispatch / digest / check / schedule` 入口 |
+| `digest.py` | （**M2，未实现**）从账本聚合渲染日摘要文本（投影，不改变账本） |
+| `cli.py` | `notify emit / status / dispatch / check / schedule` 入口（`digest` 子命令属 **M2，未实现**） |
 
 ## 4. 核心契约
 

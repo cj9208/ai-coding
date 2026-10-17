@@ -227,3 +227,33 @@ async def test_zero_workers_rejected():
     q = TaskQueue()
     with pytest.raises(ValueError, match="workers must be >= 1"):
         q.lane("bad", workers=0)
+
+
+async def test_retry_does_not_leak_join_accounting():
+    """Every get() must be matched by a task_done(), even on the retry path.
+
+    Regression: the retry branch re-put the task without calling task_done(),
+    so the unfinished-task count leaked +1 per retry and queue.join() hung
+    forever — any future join-based drain would deadlock.
+    """
+    q = TaskQueue()
+    q.lane("work", workers=1)
+    await q.start()
+
+    attempts = 0
+
+    async def flaky():
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ValueError(f"transient #{attempts}")
+        return "ok"
+
+    future = await q.submit("work", flaky, retries=3)
+    assert await future == "ok"
+    assert attempts == 3
+
+    # join() must return promptly: no leaked unfinished-task accounting.
+    await asyncio.wait_for(q._lanes["work"].queue.join(), timeout=2.0)
+
+    await q.stop()

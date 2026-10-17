@@ -19,7 +19,7 @@ DEEPEN** (one targeted pass driven by the user's answers).
       ▼
 ┌──────────┐    sub-queries with intent tags,    ┌────────────┐
 │ Planner  │ ── priority, adapter hint ────────► │ Collector  │
-└──────────┘                                     │ (parallel) │
+└──────────┘                                     │ (serial)   │
       ▲                                          └─────┬──────┘
       │ revise plan                                    │ raw captures
 ┌───────────┐                                           ▼

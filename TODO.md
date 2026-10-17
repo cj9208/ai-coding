@@ -102,6 +102,19 @@ the four remaining questions are recorded as resolved-as-deferred in
 
 ## Next, if the demand is real
 
+- [ ] **Shared-layer adoption ruling (`task_queue`, `storage.migrate`).** Both
+      shared layers shipped ahead of their adoption. `task_queue` has one
+      production consumer (`rag/enrich.py`, which constructs `TaskQueue`
+      directly); the `@queued` decorator has **zero** production users, and the
+      design's other candidates never migrated — `pdf_summarizer` still
+      hand-rolls `asyncio.Semaphore`, `research_agent`'s collector is still
+      serial. Likewise `storage.migrate()` / `user_version` has exactly one
+      consumer (`notify`), so the schema-graduation rule is paper for everyone
+      else. Decide per layer: **push** adoption (migrate the named callers,
+      giving `@queued`/`migrate` a real user) or **shrink** (retire the dead
+      decorator, document the layer as direct-construction-only). Write the
+      ruling in `docs/queue-service-design.md` / `docs/storage-usage-guide.md`
+      before touching code (docs-first).
 - [ ] file_manager → OCR integration (block-level contract for "search hit
       located on page / bbox"): `docs/ocr-backend-design.md` §7 step 4.
 - [ ] OCR HTTP service: only once several callers share one GPU or need job
