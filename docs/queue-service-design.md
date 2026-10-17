@@ -1,8 +1,8 @@
 # Queue Service 共享层设计
 
-> 一句话核心：`src/task_queue` 是通用异步任务调度层——分 lane 的任务队列管"谁先做、能做几个"，LLMClient 内的 token bucket 管"下游不能打爆"。两层各管各的，通过背压自然串联。装饰器是非侵入的接入方式：业务函数不变，`@queued` 只改变调度方式。
+> 一句话核心：`src/task_queue` 是通用异步任务调度层——分 lane 的任务队列管"谁先做、能做几个"，LLMClient 内的 token bucket 管"下游不能打爆"。两层各管各的，通过背压自然串联。受支持的接入面只有一种：**调用方自己构造 `TaskQueue`、用 `async with` 持有其生命周期**（进入即 start、退出即 drain+stop）。曾设计过的 `@queued` 装饰器与进程级默认单例已按 §12 裁决删除（2026-10-17）——隐式单例没有 owner 去 `stop()`，只会二选一：没 start 就 submit 崩，或 auto-start 后 worker 泄漏到进程退出。
 
-日期：2026-09-21。状态：**已实现**（`src/task_queue/`：`service.py` 分 lane 队列 + `llm_client/rate_limit.py` token bucket，22 测试）。采用现状（2026-10-17 核对）：唯一生产消费者是 `rag/enrich.py`，且它**直接构造 `TaskQueue`** 提交任务——`decorators.py` 的 `@queued` 装饰器目前**零生产消费者**；下文点名的 pdf_summarizer（仍手搓 `Semaphore`）与 research_agent（仍串行）尚未接入。是否推广见 TODO 的共享层采用裁决。
+日期：2026-09-21。状态：**已实现并按 §12 裁决收缩**（`src/task_queue/`：`service.py` 分 lane 队列 + `async with` 生命周期；`llm_client/rate_limit.py` token bucket）。采用现状（2026-10-17）：唯一生产消费者是 `rag/enrich.py`，**直接构造 `TaskQueue`**（显式 start/stop）。`decorators.py`（`@queued` / `get_queue` / `set_default_queue`）已删除。pdf_summarizer 保持手搓 `Semaphore`（A-1），research_agent 仍串行、接入 gated 在预算重构之后（A-3）。裁决全文见 §12。
 
 ## 1. 背景：为什么需要这个层
 
@@ -298,6 +298,8 @@ client = LLMClient(settings, rate_limits={
 
 ## 5. 装饰器：非侵入接入
 
+> **已删除（REMOVED，2026-10-17，见 §12 A-2 / §12.2）。** 本节整节为**历史设计记录**——`decorators.py`（`@queued` / `get_queue` / `set_default_queue`）已从代码库移除，不要照本节接入。删除理由：零生产消费者，且默认路径不可用（`get_queue()` 只建 lane、从不 `start()`，`submit()` 在 `_accepting=False` 时抛 `QueueClosed`）；用懒启动去补只会把显式崩溃换成"没人 stop、worker 泄漏"的隐式失败。受支持的接入面是直接构造 `TaskQueue` + `async with` 生命周期（§3.2 / §12.1）。
+
 ### 5.1 API 设计
 
 ```python
@@ -430,10 +432,11 @@ queue 本身不持久化——进程崩溃时 queue 中的待处理任务丢失�
 
 ```text
 src/task_queue/
-  __init__.py       # 导出 TaskQueue, queued, get_queue
-  service.py        # TaskQueue, _Lane, _Task, LaneStats
-  decorators.py     # @queued, get_queue() 默认实例
+  __init__.py       # 导出 TaskQueue, LaneStats, QueueClosed
+  service.py        # TaskQueue（含 async with 生命周期）, _Lane, _Task, LaneStats
 ```
+
+（`decorators.py` 曾在此，已于 2026-10-17 按 §12.2 删除。）
 
 ```text
 src/llm_client/
@@ -484,3 +487,39 @@ pyproject.toml `packages` 列表新增 `src/task_queue`。
 2. **默认 queue 实例**：用模块级 singleton（`get_queue()`）还是各项目自建？前者方便但隐式，后者显式但啰嗦。
 3. **TokenBucket 初始令牌**：启动时桶是空的（需要等第一个令牌补充）还是预填？预填可以避免冷启动等待，但可能瞬间打满 provider。
 4. **是否需要全局并发上限**：除了 lane 级 worker 数限制，是否还需要一个系统级总上限（如 `total_workers <= 20`）？
+
+## 12. 采用裁决（2026-10-17）
+
+贯穿 `task_queue` 与 `storage.migrate` 两个共享层的一条规则：**建在采用之前的层，只在有真实需求处推广；没有需求处，收缩到实际用到的面，或把触发条件写死在文档里——不要为了采用数字去迁移本来正确的代码。**（同一条规则也落在 `storage-usage-guide.md` §4 的采用裁决里。）下面把它落到本层的三处。
+
+先厘清一个框定错误：限流早就共享了——它在 `llm_client` 的 token bucket 里（§4.4），不在本层。所以 `task_queue` 的边际价值只剩 **lane 隔离 + 任务级重试/退避**。"采用薄"不是这个层的缺口，而是它的正确作用域：大多数调用方要的是限流，那个它们已经免费拿到了，没必要再套一层 queue。
+
+**A-1　不迁移 pdf_summarizer。** `@queued` 的适用域是"长期后台任务 + 需要和其他任务类型隔离"；pdf_summarizer 是一次性单文档 map-reduce，两个条件都不满足，手搓的 `Semaphore + gather` 是对的。§5.3 说的"两者共存"到此定案，不再是待选项。
+
+**A-2　`@queued` 降级为未采用的实验面，不再是文档推荐的默认接入方式。** `decorators.py` 零生产消费者，且默认路径有一个生命周期缺陷：`get_queue()` 只构造 lane、从不 `start()`，而 `submit()` 在 `_accepting=False` 时抛 `QueueClosed`——挂默认单例的 `@queued` 一调用即失败（这也回答了 §11 待确认 Q2：单例方便，但当前实现下并不可用）。`service.py` 的直接构造是 rag/enrich 已验证的姿势，是本层唯一受支持的接入面。`@queued` 要留下，就得补上默认单例的懒启动并带来一个真实消费者；在出现真实 lane 隔离需求前，不投入修复，也不推荐。
+
+**A-3　research_agent 的接入 gated 在预算重构之后。** `collector.py` 现在串行、内联 `calls_left` 预算检查，预算是"花掉才扣"的顺序语义；并行提交会让多个任务在扣减发生前一起越过上限。接入 `task_queue` 的前提是先把预算改成提交前预扣（reserve），否则并发直接击穿预算。在那之前串行是正确的，不推广。
+
+### 12.1 定位（坐实）
+
+`task_queue` 是一个**调度层，坐在 `llm_client` 的限流之上**，不是通用后台框架：
+
+- 受支持的接入面只有一种——**调用方自己构造、自己持有生命周期的 `TaskQueue`**（rag/enrich 的姿势）。层不持有进程级全局实例，不替调用方决定何时 start/stop。
+- 分工不变：worker 取任务后调 `client.chat()`，token bucket 在 client 内部限流，背压沿 §6 的链条自然传导。`task_queue` 永远不感知 model 名。
+- 它的作用域就是 **lane 隔离 + 任务级重试/退避**；限流那部分调用方已经从 `llm_client` 免费拿到，不必再套一层。
+
+### 12.2 落地改动（已执行 2026-10-17）
+
+裁决落地是一次**以减法为主**的改动，外加一个让"直接构造"足够安全的小 affordance。三步均已完成：
+
+1. ✅ **给 `TaskQueue` 加异步上下文管理器**——`async with TaskQueue(...) as q:` 进入时 `start()`、退出时 drain + `stop()`（`service.py` 的 `__aenter__`/`__aexit__`）。这是唯一受支持的生命周期姿势，让每个消费者用同一套安全模板，而不必各自手搓 start/stop（漏掉 stop 就没有优雅 drain）。注意 lane 必须在进入 `async with` 之前声明（`lane()` 拒绝在 start 后运行）。rag/enrich 仍用等价的显式 start/stop，未强制改写。
+2. ✅ **删掉进程级单例 `get_queue()` / `set_default_queue()` 与 `@queued` 装饰器**（`decorators.py` 及其测试整体移除）。单例的隐式生命周期正是 A-2 的 footgun；用懒启动去补只会把"一调就崩"的显式失败换成"没人 stop、worker 泄漏到进程退出"的隐式失败，更糟。当前没有第二个真实消费者，删除即"收缩到实际用到的面"。
+3. ✅ **同步收尾**：`__init__.py` 只导出 `TaskQueue` / `LaneStats` / `QueueClosed`；本文 §5 降级为历史设计记录、§8 包结构去掉 `decorators.py`；AGENTS.md 的 `task_queue` 行改为"已删除"表述。
+
+**反向触发条件（诚实标注不确定）**：若将来真出现第二个需要 lane 隔离的消费者，重新引入的应是"接收一个已 `start()` 的显式 `queue=` 的装饰器 + 上下文管理器"，而**绝不**是进程级默认单例——即第 2 步删掉的那个形状不再回来。
+
+### 12.3 与其他模块的合作（本裁决不改变的部分）
+
+- **`llm_client`**：合作契约不变（见 §4.4 / 12.1）。worker → `chat()` → token bucket → 背压，`task_queue` 保持 model-agnostic。
+- **`pdf_summarizer`**：不合作，保持本地 `Semaphore`（A-1）。
+- **`research_agent`**：唯一的真实集成工作，且**不在 queue 本身**——是预算语义从 spend-then-deduct 改成 reserve-before-submit（A-3）。独立、gated；在此之前串行。
