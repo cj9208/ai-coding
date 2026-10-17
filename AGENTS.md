@@ -171,11 +171,17 @@ are already there). Env convention lives only in
 - Tests mirror the source layout: `tests/test_<project>/test_<module>.py`.
 - Commit messages: short, lowercase, imperative ("add file manager with
   graded metadata search"); mention the *why* in the body when non-obvious.
+- **One feature, one branch.** Start every distinct task on its own branch off
+  `main` (`git checkout -b <feature>`); never stack a second feature onto a
+  branch that already carries another task's uncommitted or unmerged work. With
+  several tasks in flight this is what keeps them from bleeding into each other
+  — `git status` and every diff describe exactly one task, and a PR can never
+  mix two features' changes.
 - **main is protected** (required `check`, enforced for admins, no force-push
-  or deletion, since 2026-09-23): every task starts on its own branch
-  (`git checkout -b <task>`), pushes, and opens a PR (`gh pr create`);
-  it merges only after CI is green. Concurrent sessions collide on one
-  working tree otherwise — the PR is where conflicts become visible.
+  or deletion, since 2026-09-23): each branch pushes and opens a PR
+  (`gh pr create`), and merges only after CI is green. Concurrent sessions
+  collide on one working tree otherwise — the PR is where conflicts become
+  visible.
 
 ## AI skills & specs
 
