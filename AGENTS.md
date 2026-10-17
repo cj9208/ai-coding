@@ -186,14 +186,22 @@ are already there). Env convention lives only in
   visible.
 - **After the PR is open, the merge is automated — don't babysit CI.** As the
   default post-PR step, enable GitHub auto-merge:
-  `gh pr merge <n> --auto --squash --delete-branch`. GitHub then tracks the
+  `gh pr merge <n> --auto --merge --delete-branch`. GitHub then tracks the
   required `check` and merges on green by itself, so the agent never polls or
-  sleeps on CI, and a red/pending check simply never merges. Squash matches the
-  one-line `(#N)` history; `--delete-branch` drops the remote *and* local
-  feature branch on merge. Auto-merge is enabled on this repo
-  (`allow_auto_merge`, 2026-10-17) — if `--auto` is ever rejected (setting
-  flipped off), fall back to `gh pr checks <n>` and merge by hand only once
-  green. **Guardrails:** this standing authorization covers only this
+  sleeps on CI, and a red/pending check simply never merges. **Merge commit, not
+  squash** (owner preference, 2026-10-17): the merge commit's second parent
+  keeps the branch's individual commits reachable *after* `--delete-branch`
+  removes the branch ref, so `git log --graph` and GitHub's network view still
+  show a deleted branch's full per-commit history, while `main` stays one line
+  per PR — read the trunk with `git log --first-parent --oneline`, the tree with
+  `git log --graph --oneline`. (Squash, the pre-2026-10-17 default, flattens a
+  PR to one commit and discards that granularity — hence the one-liner `(#N)`
+  history before this point.) Verified compatible: `allow_merge_commit=true` and
+  `required_linear_history=false`, so `--merge` won't be rejected. `--delete-branch`
+  drops the remote *and* local feature branch on merge. Auto-merge is enabled on
+  this repo (`allow_auto_merge`, 2026-10-17) — if `--auto` is ever rejected
+  (setting flipped off), fall back to `gh pr checks <n>` and merge by hand only
+  once green. **Guardrails:** this standing authorization covers only this
   repo's own PRs, only ever merges on a green required check, and never
   `--admin`-bypasses a red or pending one unless explicitly asked in the moment.
 - **Local branch cleanup is per-branch, not a blanket sweep.** After merges,
