@@ -198,7 +198,10 @@ are already there). Env convention lives only in
   PR to one commit and discards that granularity — hence the one-liner `(#N)`
   history before this point.) Verified compatible: `allow_merge_commit=true` and
   `required_linear_history=false`, so `--merge` won't be rejected. `--delete-branch`
-  drops the remote *and* local feature branch on merge. Auto-merge is enabled on
+  removes the *local* feature branch; the **remote** head is deleted on merge by
+  the repo's `delete_branch_on_merge=true` (enabled 2026-10-17) — without that
+  setting the `--auto` path leaves the remote branch behind and you must
+  `git push origin --delete <branch>` yourself. Auto-merge is enabled on
   this repo (`allow_auto_merge`, 2026-10-17) — if `--auto` is ever rejected
   (setting flipped off), fall back to `gh pr checks <n>` and merge by hand only
   once green. **Guardrails:** this standing authorization covers only this
