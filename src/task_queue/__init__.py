@@ -1,37 +1,34 @@
-"""Async task queue with lane-based isolation and non-invasive decorator.
+"""Async task queue with lane-based isolation.
 
 Two layers, separate concerns:
 - TaskQueue (this package): schedules tasks into isolated lanes with
-  configurable worker pools and backpressure.
+  configurable worker pools and backpressure. It is model-agnostic — workers
+  call ``client.chat()`` and the token bucket in llm_client rate-limits.
 - TokenBucket (in llm_client): rate-limits calls to LLM providers.
 
-Quick start::
+The supported surface is constructing ``TaskQueue`` directly and owning its
+lifecycle. Prefer the async context manager, which starts on enter and
+drains+stops on exit (declare lanes *before* entering — ``lane()`` refuses to
+run after start)::
 
-    from task_queue import TaskQueue, queued
+    from task_queue import TaskQueue
 
-    # Option A: explicit queue
     q = TaskQueue()
     q.lane("work", workers=4)
-    await q.start()
-    result = await q.submit("work", my_fn, arg1)
-    await q.stop()
+    async with q:
+        result = await q.submit("work", my_fn, arg1)
 
-    # Option B: decorator with process-wide default queue
-    @queued(lane="default")
-    async def my_fn(arg):
-        ...
-
-    await my_fn(arg)  # transparently routed through the queue
+There is deliberately no process-wide default queue and no ``@queued``
+decorator: an implicit singleton has no owner to call ``stop()``, so it either
+crashes on submit (never started) or leaks workers (auto-started, never
+drained). See docs/queue-service-design.md §12 (adoption ruling A-2 / plan
+§12.2).
 """
 
-from .decorators import get_queue, queued, set_default_queue
 from .service import LaneStats, QueueClosed, TaskQueue
 
 __all__ = [
     "LaneStats",
     "QueueClosed",
     "TaskQueue",
-    "get_queue",
-    "queued",
-    "set_default_queue",
 ]
