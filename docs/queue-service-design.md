@@ -2,7 +2,7 @@
 
 > 一句话核心：`src/task_queue` 是通用异步任务调度层——分 lane 的任务队列管"谁先做、能做几个"，LLMClient 内的 token bucket 管"下游不能打爆"。两层各管各的，通过背压自然串联。受支持的接入面只有一种：**调用方自己构造 `TaskQueue`、用 `async with` 持有其生命周期**（进入即 start、退出即 drain+stop）。曾设计过的 `@queued` 装饰器与进程级默认单例已按 §12 裁决删除（2026-10-17）——隐式单例没有 owner 去 `stop()`，只会二选一：没 start 就 submit 崩，或 auto-start 后 worker 泄漏到进程退出。
 
-日期：2026-09-21。状态：**已实现并按 §12 裁决收缩**（`src/task_queue/`：`service.py` 分 lane 队列 + `async with` 生命周期；`llm_client/rate_limit.py` token bucket）。采用现状（2026-10-17）：唯一生产消费者是 `rag/enrich.py`，**直接构造 `TaskQueue`**（显式 start/stop）。`decorators.py`（`@queued` / `get_queue` / `set_default_queue`）已删除。pdf_summarizer 保持手搓 `Semaphore`（A-1），research_agent 仍串行、接入 gated 在预算重构之后（A-3）。裁决全文见 §12。
+日期：2026-09-21。状态：**已实现并按 §12 裁决收缩**（`src/task_queue/`：`service.py` 分 lane 队列 + `async with` 生命周期；`llm_client/rate_limit.py` token bucket）。采用现状（2026-10-17）：唯一生产消费者是 `rag/enrich.py`，**直接构造 `TaskQueue`**（显式 start/stop）。`decorators.py`（`@queued` / `get_queue` / `set_default_queue`）已删除。pdf_summarizer 保持手搓 `Semaphore`（A-1），research_agent 仍串行——预算重构（阶段 1）已落地并测试，lane 接入（阶段 2–3）gated 在真实需求信号（A-3，细化见 §12.4）。裁决全文见 §12。
 
 ## 1. 背景：为什么需要这个层
 
