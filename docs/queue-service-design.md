@@ -498,7 +498,7 @@ pyproject.toml `packages` 列表新增 `src/task_queue`。
 
 **A-2　`@queued` 降级为未采用的实验面，不再是文档推荐的默认接入方式。** `decorators.py` 零生产消费者，且默认路径有一个生命周期缺陷：`get_queue()` 只构造 lane、从不 `start()`，而 `submit()` 在 `_accepting=False` 时抛 `QueueClosed`——挂默认单例的 `@queued` 一调用即失败（这也回答了 §11 待确认 Q2：单例方便，但当前实现下并不可用）。`service.py` 的直接构造是 rag/enrich 已验证的姿势，是本层唯一受支持的接入面。`@queued` 要留下，就得补上默认单例的懒启动并带来一个真实消费者；在出现真实 lane 隔离需求前，不投入修复，也不推荐。
 
-**A-3　research_agent 的接入 gated 在预算重构之后。** `collector.py` 现在串行、内联 `calls_left` 预算检查，预算是"花掉才扣"的顺序语义；并行提交会让多个任务在扣减发生前一起越过上限。接入 `task_queue` 的前提是先把预算改成提交前预扣（reserve），否则并发直接击穿预算。在那之前串行是正确的，不推广。
+**A-3　research_agent 的接入 gated 在预算重构之后。** `collector.py` 现在串行、内联 `calls_left` 预算检查，预算是"花掉才扣"的顺序语义；并行提交会让多个任务在扣减发生前一起越过上限。接入 `task_queue` 的前提是先把预算改成提交前预扣（reserve），否则并发直接击穿预算。在那之前串行是正确的，不推广。**预算重构（阶段 1，见 §12.4）已落地并测试；lane 接入（阶段 2–3）仍 gated，等真实需求信号。**
 
 ### 12.1 定位（坐实）
 
@@ -522,4 +522,74 @@ pyproject.toml `packages` 列表新增 `src/task_queue`。
 
 - **`llm_client`**：合作契约不变（见 §4.4 / 12.1）。worker → `chat()` → token bucket → 背压，`task_queue` 保持 model-agnostic。
 - **`pdf_summarizer`**：不合作，保持本地 `Semaphore`（A-1）。
-- **`research_agent`**：唯一的真实集成工作，且**不在 queue 本身**——是预算语义从 spend-then-deduct 改成 reserve-before-submit（A-3）。独立、gated；在此之前串行。
+- **`research_agent`**：唯一的真实集成工作，且**不在 queue 本身**——是预算语义从 spend-then-deduct 改成 reserve-before-submit（A-3）。独立、gated；在此之前串行。细化见 §12.4。
+
+## 12.4 A-3 细化：reserve-before-submit 与并发化的三处击穿点
+
+A-3 的原裁决只点了一处前置（预算改成预扣）。实际读代码后确认：**把 `collector.py` 并发化会同时击穿三处共享状态，预算只是第一处**，另两处不在 queue 层，但同属这次集成的前置工作。任何一处漏掉都是静默错误（超预算 / 撞 id / 结果不可复现），不是崩溃，所以更危险。本节把三处、预算 guard 的设计、以及分阶段方案写死，供将来触发时直接执行，不必重新推导。
+
+### 为什么串行现在是对的
+
+`collector.run_batch` 是一个 `for sq in sub_queries` 的顺序循环，三个计费单元（search / fetch / extract）前各有一道 `if out.calls_used >= calls_left` 闸门。**全程单协程，check 与 `calls_used += 1` 之间没有 `await`，所以 check-then-act 天然原子**——这正是"串行正确、并发不正确"的根因。并发化不是给循环套个 `gather` 那么简单，它打破了这条隐式的原子性保证。
+
+### 三处击穿点
+
+| # | 击穿点 | 机制 | 后果 | 归属阶段 |
+|---|---|---|---|---|
+| 1 | 预算 TOCTOU | worker 先判 `calls_used < calls_left` 通过，再 `await` 网络/LLM，回来才扣减。N 个 worker 在任何人扣减前一起读到"还有余量"、一起放行 | 越过 `calls_left` 上限（每 query 最坏 7 次调用：1 search + 3×(fetch+extract)） | 阶段 1（已落地） |
+| 2 | store 的 finding-id TOCTOU | `allocate_finding_ids` 在**一个独立 session** 里 `SELECT max(F*)` 就返回，真正写入在之后的 `add_findings` 另一个 session。两个 worker 并发 allocate 读到同一个 max | 分配出**相同的 F\* id**；F\* 出现在用户可见引用里且"stable once written"，撞 id = 引用损坏 | 阶段 2 |
+| 3 | dedup + 聚类的可复现性 | 今天 fetch→查 dedup→**命中就跳过 extract**（省 LLM 预算）是一条串行优化；`SupportClusterer.key_for` 是跨 query 的共享可变状态 | 并发下同一 URL 双双 miss dedup、都去 extract（白烧预算）；`support_key` 分配顺序不确定，威胁 replay 可复现承诺（machine 05 §5.3） | 阶段 2 |
+
+注意击穿点 1 与 `llm_client/rate_limit.py` 的 token bucket 是**两件事**：token bucket 管 RPM（速率），预算 guard 管总次数（计数）。lane worker 数 + token bucket 不解决总量封顶，两者正交，都要有。
+
+击穿点 2 里 `add_capture` 反而安全——它的读-改-写在同一事务内，SQLite 写锁会把两个并发 add_capture 串行化，第二个能看到第一个已提交的行。不安全的只有 finding 这条"allocate 与 write 分处两个事务"的路径。
+
+### 预算 guard 设计（阶段 1，已落地）
+
+把扣减从 `await` **之后**挪到**之前**，封装成一个内部无 `await` 的原子计数器（asyncio 单线程下即原子）。粒度选**每调用细粒度**，因为它是现有 `calls_used >= calls_left` 闸门的直接并发安全翻译，能原样保留三条"cut short by budget"失败语义，不需要 coarse 方案（预扣 7、事后退还余量）的记账：
+
+```python
+class CallBudget:
+    """Concurrency-safe total-call cap. reserve() has no await inside, so
+    check-then-decrement is atomic under asyncio — the property the serial
+    loop got for free and concurrency would otherwise lose (A-3 breach #1)."""
+
+    def __init__(self, total: int) -> None:
+        self._remaining, self._used = total, 0
+
+    def reserve(self, n: int = 1) -> bool:
+        if self._remaining < n:
+            return False
+        self._remaining -= n
+        self._used += n
+        return True
+
+    def release(self, n: int = 1) -> None:   # 细粒度不需要，coarse 方案才用
+        self._remaining += n
+        self._used -= n
+
+    @property
+    def used(self) -> int:
+        return self._used
+```
+
+`run_batch` 用 `calls_left` 播种一个 `CallBudget`，三个计费点改成 `if not budget.reserve(): 记 SourceFailure; return`；步骤结束 `out.calls_used = budget.used`。**machine 的提交路径与"预算与产物同事务提交"的不变量（machine.py docstring / 05 §4）完全不动**——guard 只在单个 step 生命周期内存在，step 跑完才提交、下一个 step 再重新派生 `collect_left`，并发只发生在 step 内，没有跨 step 竞态。`_schedule` 里那个 `7 * len(scheduled)` 的 room 估算正好印证 7/query 的最坏值，与 guard 粒度自洽。
+
+阶段 1 在**串行下行为等价**：现有 `test_machine_e2e.py` 全绿即回归证明；另加一个用假 adapter 制造并发的单测，断言 N 个并行 sub-query 也不越过 `calls_left`（把 guard 的原子性测死，而不是靠"反正现在还是串行"）。
+
+### 架构定调：并行只做 I/O，串行做状态写入（阶段 2）
+
+击穿点 2、3 的解法不是给 store 和 clusterer 加锁，而是**收窄并发的作用域**：让 worker 只做 search/fetch/extract（纯网络+LLM，受 `CallBudget` 约束、返回纯数据），把 `add_capture` / `allocate_finding_ids` / `add_findings` / `clusterer.key_for` **全部收回驱动协程串行执行**（按提交顺序合并 future，而非 `as_completed`，以保 dedup 与聚类的确定性）。这样三个问题一次性消失，而并行化的恰好是占 99% 墙钟时间的网络+LLM 部分。
+
+需要处理的顺序依赖：dedup-before-extract。今天"先去重再抽取"省的是 LLM 预算，并发下要么保留一个原子 in-flight URL/hash 集合让并发 worker 互相去重，要么接受去重退化到驱动侧（会多花已 reserve 的 extract 调用）。这个取舍留到阶段 2 触发时再定，本节只标注它存在。
+
+### 阶段划分与触发条件
+
+| 阶段 | 内容 | 状态 | 触发条件 |
+|---|---|---|---|
+| 0 | 本节裁决（docs-first） | ✅ 本次 | — |
+| 1 | `CallBudget` + collector 三处闸门改 reserve()；串行等价 + 并发单测 | ✅ 本次 | 纯收益，即使不接 queue 也让预算语义变健壮，无投机 |
+| 2 | 切开 I/O 与状态写入（解击穿点 2、3） | ⏸ gated | 出现真实墙钟延迟需求信号 |
+| 3 | 接 `collect` lane（照 rag/enrich 直接构造范式，worker 3–4，RPM 由 token bucket 兜底）+ wallclock 串/并对比证据 | ⏸ gated | 阶段 2 完成后 |
+
+**为什么 2–3 gated 而 1 现在做**：阶段 1 是把一个隐式的正确性保证（串行原子）变成显式的（reserve guard），这是纯健壮性收益、且是 A-3 的命名前置，不引入任何投机泛化。阶段 2–3 是真正的并发化，只有在"一次真实 research session 的墙钟延迟变得难受"或"单批 sub_query 数量增长到串行不可接受"时才值得——在那之前串行是正确的，不推广（同 §12 主规则）。

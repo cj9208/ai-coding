@@ -51,6 +51,52 @@ class BudgetView:
         return self.left("research_iters")
 
 
+class CallBudget:
+    """Concurrency-safe cap on the total billable calls inside ONE collector
+    step (queue-service-design.md §12.4, A-3 breach #1).
+
+    The serial collector got atomicity for free: its ``used >= cap`` check and
+    the ``used += 1`` deduction straddle an ``await``, but nothing else ran in
+    between, so check-then-act was safe. Fanned out onto a lane, N workers all
+    read "budget left" before any deducts and blow past the cap. ``reserve()``
+    collapses check-and-deduct into one call with no ``await`` inside, so it is
+    atomic under asyncio — the property concurrency would otherwise lose.
+
+    In-memory and step-scoped on purpose: the authoritative counter is still
+    the DB row, committed with the step's artifacts (machine 05 §4). This only
+    guards the concurrent window *within* a step, so there is no cross-step
+    race — the next step re-derives ``calls_left`` from the committed total.
+    """
+
+    def __init__(self, total: int) -> None:
+        self._remaining = max(0, total)
+        self._used = 0
+
+    def reserve(self, n: int = 1) -> bool:
+        """Atomically claim *n* calls. False (nothing claimed) if fewer than
+        *n* remain. Safe to call from concurrent workers: no await inside."""
+        if self._remaining < n:
+            return False
+        self._remaining -= n
+        self._used += n
+        return True
+
+    def release(self, n: int = 1) -> None:
+        """Give back unused reservation (coarse per-query reservation would
+        need this; the fine-grained per-call path does not)."""
+        n = min(n, self._used)
+        self._remaining += n
+        self._used -= n
+
+    @property
+    def remaining(self) -> int:
+        return self._remaining
+
+    @property
+    def used(self) -> int:
+        return self._used
+
+
 COUNTER_FOR_PHASE_STEP = {
     "collect": "collect_calls",
     "deepen": "deepen_calls",
