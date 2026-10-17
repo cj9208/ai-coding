@@ -190,9 +190,10 @@ are already there). Env convention lives only in
   required `check` and merges on green by itself, so the agent never polls or
   sleeps on CI, and a red/pending check simply never merges. Squash matches the
   one-line `(#N)` history; `--delete-branch` drops the remote *and* local
-  feature branch on merge. Auto-merge must be allowed in repo settings — if
-  `--auto` is rejected, fall back to `gh pr checks <n>` and merge by hand only
-  once green. **Guardrails:** this standing authorization covers only this
+  feature branch on merge. Auto-merge is enabled on this repo
+  (`allow_auto_merge`, 2026-10-17) — if `--auto` is ever rejected (setting
+  flipped off), fall back to `gh pr checks <n>` and merge by hand only once
+  green. **Guardrails:** this standing authorization covers only this
   repo's own PRs, only ever merges on a green required check, and never
   `--admin`-bypasses a red or pending one unless explicitly asked in the moment.
 - **Local branch cleanup is per-branch, not a blanket sweep.** After merges,
