@@ -1,0 +1,22 @@
+body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0; color: #222; }
+nav { display: flex; gap: 12px; align-items: center; padding: 10px 16px;
+      background: #1f2937; color: #fff; position: sticky; top: 0; }
+nav a { color: #fff; text-decoration: none; }
+nav .spacer { flex: 1; }
+nav button { cursor: pointer; }
+main { padding: 16px; max-width: 960px; margin: 0 auto; }
+.bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.bar input, .bar select { padding: 6px 8px; }
+.qcard { display: flex; gap: 10px; border: 1px solid #e5e7eb; border-radius: 6px;
+         padding: 10px; margin-bottom: 10px; }
+.qbody p { margin: 2px 0; }
+.qmeta { color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+.badge { background: #eef2ff; color: #4338ca; border-radius: 4px; padding: 0 6px; margin-left: 6px; }
+.thumb { max-width: 220px; border: 1px solid #e5e7eb; margin-top: 6px; }
+.muted { color: #6b7280; }
+.grid { border-collapse: collapse; width: 100%; }
+.grid td, .grid th { border: 1px solid #e5e7eb; padding: 4px 8px; font-size: 13px; }
+.grid tr.err td { background: #fef2f2; }
+#pick-list li { display: flex; gap: 8px; align-items: center; padding: 6px; border-bottom: 1px solid #e5e7eb; }
+#pick-list .qtext { flex: 1; }
+.handle { color: #9ca3af; cursor: grab; }

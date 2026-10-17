@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>文档清单</h2>
+<table class="grid">
+  <tr><th>章</th><th>节</th><th>课时</th><th>标题</th><th>状态</th><th>题数</th></tr>
+  {% for chapter, section, lesson, title, status, n in rows %}
+  <tr class="{{ 'err' if status != 'ok' else '' }}">
+    <td>{{ chapter }}</td><td>{{ section }}</td><td>{{ lesson }}</td>
+    <td>{{ title }}</td><td>{{ status }}</td><td>{{ n }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -138,6 +138,7 @@ owner row in `TODO.md` so "not yet verified" stays a debt, not a myth:
 | photo_desk HEIC + NAS | real device tree mounted at `PHOTO_ROOT` | acceptance debt recorded in TODO.md (both M0 and M1 lines) |
 | quantdesk WS recording | a network where fstream actually pushes | live-verified gap: this machine's WS is silent; liquidation *positive* path awaits TODO.md |
 | notify Telegram delivery | real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, then `uv run notify emit … --severity alert && uv run notify schedule run-now && uv run notify schedule status` | **verified 2026-09-23** — four acceptance items on a real phone, plus one *unattended* round launched by the registered Task Scheduler (`LastTaskResult 0`, log tail in `data/notify/dispatch.log`); owed: the closed-lid sleep-wake catch-up (TODO.md) |
+| exam_builder composed paper | `uv run exam compose --ids … --out paper.docx`, then open it in real Word | package integrity is machine-checked (every `r:embed`/`r:id` resolves to a part that exists, OLE+WMF present, zip clean); **the Word-side eyeball check of formula/figure fidelity is still owed** — code can prove the parts are there, not that Word renders them |
 | skill sync reproducibility | `uv run skills sync` on a deleted clone | verified: clone returned at its pin; keep as the check whenever UPSTREAMS changes |
 
 The rule that keeps this layer honest: **a connectivity that *pretends* to
@@ -163,7 +164,10 @@ session inherits a verdict instead of re-deriving one:
   result you can reproduce byte-for-byte is what stops p-hacking-by-retry.
 - **Golden JSONL fixtures** — `tests/golden/photo_groups.jsonl` locks the
   burst-grouping rules (the only spec of the 3-level rule), `tests/golden/rag_sample.jsonl`
-  the rag contract, and `tests/golden/notify_policy.jsonl` the eight delivery
+  the rag contract, `tests/golden/exam_split.jsonl` the three question-splitting
+  shapes exam_builder must handle (literal number / `w:numPr` auto-number /
+  missing anchor → error, never guess), and `tests/golden/notify_policy.jsonl`
+  the eight delivery
   decisions of §4.4 (first-of-key, 5→2 inside a window, window expiry,
   per-key streams, urgent info, 3-strikes stuck) — so "what counts as spam" is
   a diff, not a memory. Unlike L1–L3 these don't *check* new code; they *are*

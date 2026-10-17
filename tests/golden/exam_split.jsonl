@@ -1,0 +1,3 @@
+{"file": "doc_basic.xml", "questions": [1, 2, 3], "first_lines": ["1．五条线段的长分别为1 cm，2 cm，可以构成〔公式〕个三角形．", "2．三角形的三边长分别为2，7，a，则a的取值范围是〔图〕．", "3．（1）如果等腰三角形的一边长是5，求它的周长．"], "answers": [1, 2, 3], "errors": []}
+{"file": "doc_numpr.xml", "questions": [1, 2], "first_lines": ["在△ABC中，∠A＝90°，则∠B＝．", "2．如图，AD⊥BC，∠BAD＝40°．"], "answers": [1, 2], "errors": []}
+{"file": "doc_noanchor.xml", "questions": [], "first_lines": [], "answers": [], "errors": ["missing question anchor"]}
