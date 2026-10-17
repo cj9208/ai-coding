@@ -8,8 +8,11 @@ consumer talks to a backend's native output directly, then upgrading the backend
 (PaddleOCR-VL 1.6 -> 1.7 -> something else) becomes a cross-project rewrite.
 Instead this package owns one versioned document shape: backends are thin
 adapters that map their native result into it (one-way), consumers read only
-it, and the two sides can upgrade independently because ``schema_version`` +
-``capabilities`` + ``kind`` describe exactly what a document promises.
+it, and the two sides can upgrade independently because the persisted
+``schema_version`` (document) + ``kind`` (block) describe exactly what a
+document promises. (``capabilities`` is a live adapter property, not a
+serialized field — a consumer reading a ``.ocr.json`` on disk branches on
+``schema_version``/``kind``, never on ``capabilities``.)
 
 Design rules, in one place so they cannot drift:
 
