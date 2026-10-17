@@ -2,8 +2,11 @@
 
 Pipeline per sub-query: search -> top-k fetch -> store Capture (raw,
 immutable) -> extract Findings (LLM, quote-audited) -> store. Every budget
-unit (search call, fetch, extraction LLM call) is counted here; the
-orchestrator commits the total in the same transaction as batch artifacts.
+unit (search call, fetch, extraction LLM call) is reserved on a CallBudget
+BEFORE its await — reserve-before-submit, not spend-then-deduct — so the cap
+holds even if sub-queries are later fanned out onto concurrent workers
+(queue-service-design.md §12.4, A-3). The orchestrator commits the step total
+in the same transaction as batch artifacts.
 
 Failure policy: adapter error -> retry x2 -> SourceFailure recorded; a dead
 URL never hard-fails the session (02 §3).
@@ -24,6 +27,7 @@ from ..contracts.models import (
     SubQuery,
 )
 from ..contracts.prompts import render_prompt
+from ..orchestrator.budget import CallBudget
 from ..persistence.store import SessionStore
 from .adapters.base import AdapterError, SourceAdapter
 from .normalizer import SupportClusterer, claim_tokens, quote_ok
@@ -61,6 +65,7 @@ class Collector:
         calls_left: int,
     ) -> BatchOutcome:
         out = BatchOutcome()
+        budget = CallBudget(calls_left)
         clusterer = SupportClusterer()
         clusterer.restore_from(
             {
@@ -71,7 +76,10 @@ class Collector:
         )
         criteria = sorted({c for f in existing_findings for c in f.decision_criteria})
         for sq in sub_queries:
-            if out.calls_used >= calls_left:
+            # Advisory fast-path skip: keeps the serial failure record exact
+            # (adapter_hint, "before this query ran"). The authoritative,
+            # concurrency-safe gate is the reserve() inside _run_one.
+            if budget.remaining <= 0:
                 out.failures.append(
                     SourceFailure(
                         query_id=sq.id,
@@ -80,9 +88,8 @@ class Collector:
                     )
                 )
                 continue
-            await self._run_one(
-                brief, sq, clusterer, criteria, batch_no, calls_left, out
-            )
+            await self._run_one(brief, sq, clusterer, criteria, batch_no, budget, out)
+        out.calls_used = budget.used
         return out
 
     async def _run_one(
@@ -92,21 +99,32 @@ class Collector:
         clusterer,
         criteria: list[str],
         batch_no: int,
-        calls_left: int,
+        budget: CallBudget,
         out: BatchOutcome,
     ) -> None:
         adapter = self._pick(sq)
+        # reserve-before-submit: claim the search call atomically before the
+        # await, so concurrent workers can't all pass a check and then overrun
+        # the cap (queue-service-design.md §12.4 breach #1). A failed search
+        # still costs the reserved call, matching the old spend-then-deduct.
+        if not budget.reserve():
+            out.failures.append(
+                SourceFailure(
+                    query_id=sq.id,
+                    adapter=adapter.kind,
+                    error="budget exhausted before this query ran",
+                )
+            )
+            return
         try:
             hits = await self._with_retries(lambda: adapter.search(sq.query, TOP_K))
         except AdapterError as exc:
-            out.calls_used += 1
             out.failures.append(
                 SourceFailure(query_id=sq.id, adapter=adapter.kind, error=str(exc))
             )
             return
-        out.calls_used += 1
         for hit in hits:
-            if out.calls_used >= calls_left:
+            if budget.remaining <= 0:
                 out.failures.append(
                     SourceFailure(
                         query_id=sq.id,
@@ -116,7 +134,7 @@ class Collector:
                 )
                 return
             await self._capture_and_extract(
-                brief, sq, hit, clusterer, criteria, batch_no, calls_left, out
+                brief, sq, hit, clusterer, criteria, batch_no, budget, out
             )
 
     async def _capture_and_extract(
@@ -127,21 +145,29 @@ class Collector:
         clusterer,
         criteria: list[str],
         batch_no: int,
-        calls_left: int,
+        budget: CallBudget,
         out: BatchOutcome,
     ) -> None:
         adapter = self._pick(sq)
+        if not budget.reserve():  # the fetch is a billable call
+            out.failures.append(
+                SourceFailure(
+                    query_id=sq.id,
+                    adapter=adapter.kind,
+                    url=hit.url,
+                    error="batch cut short by budget",
+                )
+            )
+            return
         try:
             fetched = await self._with_retries(lambda: adapter.fetch(hit))
         except AdapterError as exc:
-            out.calls_used += 1
             out.failures.append(
                 SourceFailure(
                     query_id=sq.id, adapter=adapter.kind, url=hit.url, error=str(exc)
                 )
             )
             return
-        out.calls_used += 1
         capture_id, deduped = self.store.add_capture(
             brief.session_id,
             url=fetched.url,
@@ -155,7 +181,7 @@ class Collector:
             out.captures_deduped += 1
             return
         out.captures_new += 1
-        if out.calls_used >= calls_left:
+        if not budget.reserve():  # the extraction LLM call is billable too
             out.failures.append(
                 SourceFailure(
                     query_id=sq.id,
@@ -177,14 +203,12 @@ class Collector:
                 prompt, schema=ExtractionResult, temperature=0.0
             )
         except Exception as exc:  # noqa: BLE001 — one bad page can't kill the batch
-            out.calls_used += 1
             out.failures.append(
                 SourceFailure(
                     query_id=sq.id, adapter="extract", url=fetched.url, error=str(exc)
                 )
             )
             return
-        out.calls_used += 1
         valid = [r for r in draft.findings if quote_ok(r.quote, fetched.text)]
         out.quotes_rejected += len(draft.findings) - len(valid)
         if out.quotes_rejected:
