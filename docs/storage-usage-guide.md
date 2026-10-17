@@ -112,6 +112,14 @@ def open_store(db):
 - 戳比代码新（旧 checkout 开新库）抛 `SchemaTooNewError`，报错是"请更新代码"，而不是难懂的运行错误——这正是老错误现在会伪装成的样子。
 - 未来的真实迁移就是 `MIGRATIONS[2] = _v1_to_v2` 一个函数：先 `CREATE TABLE 新`、`INSERT SELECT` 搬数据、`DROP` 旧、重建索引；SQLite 不支持 rename column，改名按"新列+拷贝+弃旧列"走，`ensure_columns` 依旧在场。
 
+### 采用裁决（2026-10-17）
+
+同一条规则（见 `queue-service-design.md` §12）：建在采用之前的层，只在有真实需求处推广，否则收缩或把触发条件写死。落到 schema 演化的两层：
+
+**S-1　确认毕业规则，不主动盖戳。** `ensure_columns` 已被 4 个项目采用（ai_market_radar / notify / orchestrator / photo_desk），是加列场景的默认姿势。`migrate()` + `user_version` 是 just-in-time 的：唯一消费者 notify 正是上面"谁下次动哪个项目的 store 谁顺手接上"规则的正常工作——它给自己的库盖了 v1 基线。裁决：**不**把主动盖戳推广到没有非加列变更的项目。触发条件已经写死（改名 / 换语义 / 重建索引）；在那之前加 `SCHEMA_VERSION` 只是一个空戳，YAGNI。
+
+**S-2　澄清两处会被误算作"采用"的东西。** `research_agent/contracts/models.py` 的 `SCHEMA_VERSION = 1` 是数据契约字段的默认值（`schema_version: int`），随对象序列化，和 DB 文件头的 `user_version` 戳无关——别把它算作 `migrate()` 的采用；ocr_backend / ocr_review / rag 的 `SCHEMA_VERSION = "1.0"` 同理，都是契约字段。`migrate()` 的真实采用只有 notify 一处，§6 现状表据此补齐。
+
 ## 5. 测试注入约定
 
 共享层对测试友好全靠两点：client 接受任意 URL/Path，且**不读任何环境变量**。照既有习惯注入临时库：
@@ -129,8 +137,11 @@ file_manager 的测试则完全不感知：它给 `create_app` 传 `Settings(db_
 | 项目 | 状态 | 入口 |
 |---|---|---|
 | `file_manager` | 已接入 | `app.state.storage`；索引声明在 `fts.py`（`FILES_INDEX`） |
-| `ai_market_radar` | 已接入 | `KnowledgeBase` 内部（`store.py`） |
+| `ai_market_radar` | 已接入 | `KnowledgeBase` 内部（`store.py`）；`ensure_columns` 补 `items.tag` |
 | `research_agent` | 已接入 | `SessionStore.open(db_url)`（内部建 `SqliteClient` + create_all）；表定义在其 `persistence/db.py` |
+| `notify` | 已接入 | `ledger.py`：`ensure_columns` 补 `deliveries.attempts` + `migrate(SCHEMA_VERSION=1, {1: None})` 基线盖戳——**唯一的 `migrate()` 消费者** |
+| `orchestrator` | 已接入 | `store.py`：`ensure_columns` 补列 |
+| `photo_desk` | 已接入 | `library.py`：`ensure_columns` 补 M1 新增列 |
 
 ## 7. 注意事项
 

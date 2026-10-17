@@ -151,6 +151,17 @@ class TaskQueue:
         self._started = False
         logger.info("TaskQueue stopped")
 
+    async def __aenter__(self) -> "TaskQueue":
+        """Start the queue. Declare lanes *before* entering — ``lane()``
+        refuses to run after start. This is the one supported lifecycle:
+        ``async with`` guarantees a drain+stop on the way out, so a consumer
+        can't forget to shut the workers down."""
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
+        await self.stop()
+
     async def submit(
         self,
         lane: str,

@@ -257,3 +257,36 @@ async def test_retry_does_not_leak_join_accounting():
     await asyncio.wait_for(q._lanes["work"].queue.join(), timeout=2.0)
 
     await q.stop()
+
+
+async def test_async_context_manager_starts_and_stops():
+    """`async with` is the supported lifecycle: start on enter, drain+stop on
+    exit, so a consumer can't forget to shut the workers down. Lanes are
+    declared before entering (lane() refuses to run after start)."""
+    q = TaskQueue()
+    q.lane("work", workers=2)
+
+    async def add(a, b):
+        return a + b
+
+    async with q as entered:
+        assert entered is q
+        future = await q.submit("work", add, 3, 4)
+        assert await future == 7
+
+    # exited the block -> stopped -> no longer accepting.
+    with pytest.raises(QueueClosed):
+        await q.submit("work", add, 1, 2)
+
+
+async def test_async_context_manager_stops_on_exception():
+    q = TaskQueue()
+    q.lane("work", workers=1)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async with q:
+            raise RuntimeError("boom")
+
+    # Workers were still shut down despite the exception propagating.
+    with pytest.raises(QueueClosed):
+        await q.submit("work", lambda: None)

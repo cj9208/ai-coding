@@ -116,19 +116,8 @@ the four remaining questions are recorded as resolved-as-deferred in
 
 ## Next, if the demand is real
 
-- [ ] **Shared-layer adoption ruling (`task_queue`, `storage.migrate`).** Both
-      shared layers shipped ahead of their adoption. `task_queue` has one
-      production consumer (`rag/enrich.py`, which constructs `TaskQueue`
-      directly); the `@queued` decorator has **zero** production users, and the
-      design's other candidates never migrated — `pdf_summarizer` still
-      hand-rolls `asyncio.Semaphore`, `research_agent`'s collector is still
-      serial. Likewise `storage.migrate()` / `user_version` has exactly one
-      consumer (`notify`), so the schema-graduation rule is paper for everyone
-      else. Decide per layer: **push** adoption (migrate the named callers,
-      giving `@queued`/`migrate` a real user) or **shrink** (retire the dead
-      decorator, document the layer as direct-construction-only). Write the
-      ruling in `docs/queue-service-design.md` / `docs/storage-usage-guide.md`
-      before touching code (docs-first).
+- [x] **Shared-layer adoption ruling (`task_queue`, `storage.migrate`) — ruled + `task_queue` shrink executed 2026-10-17.** Ruling in `docs/queue-service-design.md` §12 (A-1..A-3, plan §12.2) and `docs/storage-usage-guide.md` §4 采用裁决 (S-1..S-2); shared rule = *push only where real demand exists, otherwise shrink to the used surface or write the trigger down — never migrate correct code to inflate an adoption number*. **Done:** `task_queue` shrunk to direct `TaskQueue` construction — added an `async with` lifecycle (`__aenter__`/`__aexit__` → start/drain/stop) and **deleted** `decorators.py` (`@queued` + the process-wide `get_queue()`/`set_default_queue()` singleton, whose default path raised `QueueClosed` and which lazy-start would only turn into a silent worker leak); `__init__` now exports just `TaskQueue`/`LaneStats`/`QueueClosed`; §5/§8/AGENTS.md synced. `storage.migrate()` affirmed as just-in-time (no proactive stamping; `notify` is the reference adopter, `research_agent`'s `SCHEMA_VERSION` is a data-contract field, not a DB stamp) — no code change needed.
+- [ ] **research_agent → `task_queue` (gated, A-3).** Only real remaining queue-adoption candidate. Blocked on a budget refactor first: `collector.py`'s `calls_left` is spend-then-deduct, so parallel submit would breach the cap — change it to reserve-before-submit, then concurrent collection can ride a `TaskQueue` lane. Serial stays correct until the demand is real.
 - [ ] file_manager → OCR integration (block-level contract for "search hit
       located on page / bbox"): `docs/ocr-backend-design.md` §7 step 4.
 - [ ] OCR HTTP service: only once several callers share one GPU or need job
