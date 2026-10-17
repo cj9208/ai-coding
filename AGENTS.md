@@ -184,6 +184,24 @@ are already there). Env convention lives only in
   (`gh pr create`), and merges only after CI is green. Concurrent sessions
   collide on one working tree otherwise — the PR is where conflicts become
   visible.
+- **After the PR is open, the merge is automated — don't babysit CI.** As the
+  default post-PR step, enable GitHub auto-merge:
+  `gh pr merge <n> --auto --squash --delete-branch`. GitHub then tracks the
+  required `check` and merges on green by itself, so the agent never polls or
+  sleeps on CI, and a red/pending check simply never merges. Squash matches the
+  one-line `(#N)` history; `--delete-branch` drops the remote *and* local
+  feature branch on merge. Auto-merge must be allowed in repo settings — if
+  `--auto` is rejected, fall back to `gh pr checks <n>` and merge by hand only
+  once green. **Guardrails:** this standing authorization covers only this
+  repo's own PRs, only ever merges on a green required check, and never
+  `--admin`-bypasses a red or pending one unless explicitly asked in the moment.
+- **Local branch cleanup is per-branch, not a blanket sweep.** After merges,
+  `git fetch --prune`, then delete only branches whose work is already in
+  `main` (content-redundant) — `git branch --merged main` is the candidate
+  list. Hold any branch that backs an open PR (`gh pr list` tells you which),
+  and hold a local-only branch that was never pushed/integrated; when the remote
+  is unreachable, integrate locally rather than delete. Never `git branch -D`
+  across the lot.
 
 ## AI skills & specs
 
