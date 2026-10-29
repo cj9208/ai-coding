@@ -100,3 +100,27 @@ TARGET_DIRS: tuple[str, ...] = (".agents/skills",)
 #: in a diff and survives every pin bump — the sidecar-over-machine-output
 #: posture ``ocr_review`` uses for proofreadings.
 OWN_SKILLS_DIR = "skills"
+
+#: Which upstream revision each override under ``OWN_SKILLS_DIR`` was copied
+#: from, keyed by install name. Only overrides need an entry — a first-party
+#: skill shadows nothing, so there is no upstream copy for it to drift from.
+#:
+#: This is the fact that makes drift detectable. An override is a *copy*, so it
+#: goes stale at the moment its upstream's pin is bumped, and that is precisely
+#: when ``skills outdated`` starts reporting "up to date": the pin no longer
+#: trails the tip, so nothing suggests the folder under ``skills/`` is still the
+#: previous revision's, now shadowing a version it never saw. Recording the base
+#: beside the pin lets ``sync`` ask the clone whether that one skill folder
+#: actually changed between the two (guide §7) — offline, since a full clone
+#: already holds both revisions.
+#:
+#: The sha is written literally rather than read off ``UPSTREAMS``: deriving it
+#: would pin base to the current value and make the two permanently equal, which
+#: is the very thing being measured. Bumping a pin past an override is therefore
+#: a deliberate second edit here, and forgetting it is caught rather than
+#: silently absorbed.
+OVERRIDE_BASES: dict[str, str] = {
+    "openspec-proposal": "092825896ed788b40c7ea987c17f1c5f75ed843a",
+    "openspec-apply": "092825896ed788b40c7ea987c17f1c5f75ed843a",
+    "openspec-archive": "092825896ed788b40c7ea987c17f1c5f75ed843a",
+}

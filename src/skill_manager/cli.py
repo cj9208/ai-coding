@@ -17,7 +17,10 @@ A clone is a mirror of upstream, so it is never edited in place: ``sync``
 refuses to move one that carries uncommitted changes, and the tracked
 ``skills/`` directory (:data:`skill_manager.sources.OWN_SKILLS_DIR`) is where
 a local difference belongs — a folder there named as the skill installs
-replaces that skill in every target.
+replaces that skill in every target. Such a copy records the revision it was
+cut from in :data:`skill_manager.sources.OVERRIDE_BASES`, which is what lets
+``sync`` say when the pin has moved past it and ``outdated`` name the
+overrides a bump would shadow.
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ import click
 from utils.paths import REPO_ROOT
 
 from . import install, vendor
-from .sources import OWN_SKILLS_DIR, TARGET_DIRS, UPSTREAMS
+from .sources import OVERRIDE_BASES, OWN_SKILLS_DIR, TARGET_DIRS, UPSTREAMS
 
 
 def sync(provision: bool = True) -> int:
@@ -46,11 +49,16 @@ def sync(provision: bool = True) -> int:
                     raise ValueError(f"{name}: {exc}") from exc
         skills = install.planned(UPSTREAMS)
         _reject_empty_upstreams(skills)
+        _reject_unbased_overrides(skills)
+        stale = install.stale_overrides(
+            skills, UPSTREAMS, OVERRIDE_BASES, vendor.folder_differs
+        )
     except (vendor.GitError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     _warn_about_edited_clones()
+    _warn_about_stale_overrides(stale)
     for target in install.install(skills):
         removed = f", pruned {', '.join(target.removed)}" if target.removed else ""
         print(
@@ -71,6 +79,30 @@ def _warn_about_edited_clones() -> None:
                 f" nowhere -- move them into {OWN_SKILLS_DIR}/",
                 file=sys.stderr,
             )
+
+
+def _reject_unbased_overrides(skills: Sequence[install.Skill]) -> None:
+    """An override with no recorded base cannot be checked for drift, so it
+    would install looking declared-and-watched while nothing watches it."""
+    missing = install.missing_bases(skills, OVERRIDE_BASES)
+    if missing:
+        raise ValueError(
+            f"no recorded base for override: {', '.join(missing)}"
+            " -- add the commit it was copied from to sources.OVERRIDE_BASES"
+        )
+
+
+def _warn_about_stale_overrides(stale: Sequence[install.StaleOverride]) -> None:
+    """The override still installs — being deliberately behind is legitimate —
+    but the pin has moved past the revision it was copied from *and* upstream's
+    copy of that folder changed on the way, so its changes are being shadowed."""
+    for item in stale:
+        print(
+            f"warning: override {item.name} was cut from {item.base[:7]} but"
+            f" {item.upstream}'s copy has changed by {item.pin[:7]} -- re-copy it,"
+            f" re-apply the difference, then bump its OVERRIDE_BASES entry",
+            file=sys.stderr,
+        )
 
 
 def _reject_empty_upstreams(skills: Sequence[install.Skill]) -> None:
@@ -114,7 +146,12 @@ def list_declared() -> int:
     if overrides:
         print("\noverrides from the tracked skills/ directory:")
         for skill in overrides:
-            print(f"  {skill.name} replaces the {skill.overrides} version")
+            pin = UPSTREAMS[skill.overrides].commit
+            base = OVERRIDE_BASES.get(skill.name)
+            print(
+                f"  {skill.name} replaces the {skill.overrides} version"
+                f" (base {_base_note(base, pin)})"
+            )
 
     for target in target_dirs():
         installed = install.installed_skill_names(target)
@@ -123,7 +160,23 @@ def list_declared() -> int:
     return 0
 
 
+def _base_note(base: str | None, pin: str) -> str:
+    """Where an override was cut from, relative to the pin it now shadows.
+
+    Declaration-level only — no git here, so ``list`` stays usable on a machine
+    whose clones are not provisioned yet. Whether a moved pin actually changed
+    that folder is ``sync``'s answer, since ``sync`` is what puts the clone in
+    place to ask.
+    """
+    if base is None:
+        return "none recorded -- sync will refuse"
+    if base == pin:
+        return f"{base[:7]} = pin"
+    return f"{base[:7]}, pin {pin[:7]} moved -- sync says whether it drifted"
+
+
 def outdated() -> int:
+    overridden = _override_folders()
     for name, upstream in UPSTREAMS.items():
         try:
             update = vendor.check_updates(upstream)
@@ -137,7 +190,29 @@ def outdated() -> int:
         print(
             f"{name}: {upstream.commit[:7]} -> {update.tip}, {update.behind} ahead{changed}"
         )
+        # a line of its own rather than a marker inside ``changed``, which is
+        # truncated: the one folder worth reading must not be the 7th
+        ours = overridden.get(name, {})
+        shadowed = sorted(ours[f] for f in update.changed if f in ours)
+        if shadowed:
+            print(f"  overrides to re-copy before bumping: {', '.join(shadowed)}")
     return 0
+
+
+def _override_folders() -> dict[str, dict[str, str]]:
+    """Upstream name -> {its folder name: our install name}, for overrides.
+
+    Keyed by the *upstream* folder name because that is what
+    :func:`vendor.check_updates` reports, and the two differ whenever the
+    upstream carries a prefix. An override is why a changed folder matters more
+    than usual: upstream's change would not merely be uninstalled, it would be
+    actively shadowed by a copy that predates it.
+    """
+    result: dict[str, dict[str, str]] = {}
+    for skill in install.planned(UPSTREAMS):
+        if skill.overrides:
+            result.setdefault(skill.overrides, {})[skill.upstream_folder] = skill.name
+    return result
 
 
 def _truncated(names: Sequence[str], keep: int = 6) -> str:
@@ -225,7 +300,7 @@ def list_cmd() -> None:
 
 @cli.command("outdated")
 def outdated_cmd() -> None:
-    """fetch and report pins that trail their upstream"""
+    """report pins that trail their upstream, naming shadowed overrides"""
     raise SystemExit(outdated())
 
 

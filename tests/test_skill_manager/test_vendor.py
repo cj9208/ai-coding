@@ -217,3 +217,44 @@ def test_check_updates_reports_nothing_changed_when_pinned_at_the_tip(
     assert vendor.check_updates(upstream) == vendor.Update(
         tip=TIP[:7], behind=0, changed=[]
     )
+
+
+def test_folder_differs_asks_about_one_folder_between_two_revisions(
+    pinned_root, monkeypatch
+):
+    upstream = make_upstream()
+    fake = FakeGit(heads={upstream.clone_dir: PIN}, diff="beta-proposal/SKILL.md")
+    monkeypatch.setattr(vendor, "_git", fake)
+
+    assert vendor.folder_differs(upstream, "beta-proposal", PIN, TIP) is True
+    assert fake.calls[-1][0] == [
+        "diff",
+        "--name-only",
+        PIN,
+        TIP,
+        "--",
+        "beta-proposal",
+    ]
+
+
+def test_folder_differs_reports_an_unchanged_folder_as_false(pinned_root, monkeypatch):
+    upstream = make_upstream()
+    monkeypatch.setattr(
+        vendor, "_git", FakeGit(heads={upstream.clone_dir: PIN}, diff="")
+    )
+
+    assert vendor.folder_differs(upstream, "beta-proposal", PIN, TIP) is False
+
+
+def test_folder_differs_scopes_the_query_to_the_upstreams_skills_dir(
+    pinned_root, monkeypatch
+):
+    """A prefix-style upstream keeps its skills in a subfolder, so the path git
+    is asked about has to carry it — otherwise the diff covers the whole repo
+    and every folder reads as changed."""
+    upstream = make_upstream(skills_dir="skills/cloud")
+    fake = FakeGit(heads={upstream.clone_dir: PIN}, diff="skills/cloud/gke/SKILL.md")
+    monkeypatch.setattr(vendor, "_git", fake)
+
+    assert vendor.folder_differs(upstream, "gke", PIN, TIP) is True
+    assert fake.calls[-1][0][-1] == "skills/cloud/gke"
