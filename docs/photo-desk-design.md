@@ -125,7 +125,7 @@ photo 表的 `state` 派生自账本最新一行：`in_place / quarantined / orp
 
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
-| **M0 读懂** ✅ | config / scan / exif / library / 时间线页 | 对一个含数百张真实照片的测试目录：增量扫描二次运行只 stat 不改的行；时间线按 EXIF 拍摄日（非文件 mtime）分组正确；HEIC/JPG 混排可读。**验收记录（2026-09-22）**：54 张演示树全绿、幂等复扫 unchanged-only；HEIC 写固件本机不可用，JPG/PNG 覆盖管线，HEIC 真读欠账在 TODO.md |
+| **M0 读懂** ✅ | config / scan / exif / library / 时间线页 | 对一个含数百张真实照片的测试目录：增量扫描二次运行只 stat 不改的行；时间线按 EXIF 拍摄日（非文件 mtime）分组正确；HEIC/JPG 混排可读。**验收记录（2026-09-22）**：54 张演示树（`data/photo_desk_demo/`，gitignored）全绿、幂等复扫 unchanged-only；HEIC 写固件本机不可用，JPG/PNG 覆盖管线，HEIC 真读欠账在 TODO.md |
 | **M1 筛选**（诉求①）✅ | quality / groups / triage + restore CLI | 构造 golden 连拍组（含人为模糊样张）：组识别全对、垫底样张被隔离且账本可放回；`restore --group` 与 sha256 不符拒绝路径均有测试；真实目录演练一次，隔离清单先出、人工确认后执行（首次执行保留 `--dry-run` 默认开）。**验收记录（2026-09-23）**：`tests/golden/photo_groups.jsonl` 7 例锁死归组规则；`test_triage.py` 覆盖 dry-run 不落盘、账本落行、单张/整组放回、篡改拒放、占位拒覆盖、孤儿重建父目录、无分数不错杀；演示树真实演练 scan→triage(3 张垫底全中)→--apply→restore --group+--photo 全回原位、sha256 验身通过。**落地偏离两处**：① 时间线只灰显 quarantined，放回按钮归 M2 编辑模式（CLI `photos restore` 已给全）；② golden 连拍用"同秒不同 SubSecTime"表达 <1s 间隔——EXIF DateTimeOriginal 秒级粒度，同秒多张必须靠毫秒字段 |
 | **M2 回看**（诉求②） | tag 体系 / FTS 检索 / 查看·编辑双模式 UI / 缩略图缓存 | 浏览器实测：中文 tag 搜索命中、编辑模式打 tag、重启后持久；缩略图缓存重生成幂等 |
 | **M3 机读 tag** | CLIP/人脸，独立立项 | gated：仅当 M2 用起来后确认"找不到照片"是真实痛点才启动 |

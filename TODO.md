@@ -87,6 +87,13 @@ the four remaining questions are recorded as resolved-as-deferred in
       ships `enabled: false`. `notify schedule` wraps only the dispatch task, so
       (b) is its own wrapper decision (a different task, different executable,
       different log), not a flag on this one.
+- [ ] **notify M2 is unbuilt: the daily digest and the ping/email adapter.**
+      Only stdout + telegram ship, so `ledger.pending_for` defaults to alert+warn
+      and **info-severity events are ledger-only — recorded, never delivered**
+      (by design, `docs/notify-design.md` §4.4 + §4.6, not a bug to fix). The
+      digest is also the L4 failure domain ("no daily digest = something is
+      wrong"), so until it exists the four-domain chain of D-4 has no
+      human-visible end.
 - [ ] **ocr-review: one real mouse drag-to-add-block in a visible browser
       window.** Everything else (pixel alignment, corrected/rejected/added
       blocks, save/409, export) was verified end-to-end, but the headless

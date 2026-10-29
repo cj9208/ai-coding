@@ -190,7 +190,7 @@ uv run notify schedule run-now                         # 立刻补一轮（走�
 uv run notify schedule remove
 ```
 
-它生成的是 `Register-ScheduledTask`，把该记的事每次都记对，而不是靠人记得：工作目录 = `REPO_ROOT`、重跑间隔、`-StartWhenAvailable`、stdout/stderr 重定向到 `data/notify/dispatch.log`。**为什么不是 `schtasks`**：本机实测它的旗标表里**没有**工作目录项（`/D /DELAY /DU /EC /ED /ET /F /I /IT /K /M /MO /NP /P /RI /RL /RP /RU /S /SD /ST /TN /TR /U /V1 /XML /Z`），只能把 `cd /d` 塞进 `/TR`；而 `StartWhenAvailable`（错过补跑）与 `ExecutionTimeLimit` 只有 `Register-ScheduledTask` 能显式设。动作直接调用装好的 `.venv/Scripts/notify.exe` 而不是 `uv run`：无人值守的进程不该依赖 `uv` 在 `PATH` 上、也不该在那一刻赌解析器的判断。
+它生成的是 `Register-ScheduledTask`，把该记的事每次都记对，而不是靠人记得：工作目录 = `REPO_ROOT`、重跑间隔、`-StartWhenAvailable`、stdout/stderr 重定向到 `data/notify/dispatch.log`。**为什么不是 `schtasks`**：本机实测它的旗标表里**没有**工作目录项（`/D /DELAY /DU /EC /ED /ET /F /I /IT /K /M /MO /NP /P /RI /RL /RP /RU /S /SD /ST /TN /TR /U /V1 /XML /Z`），只能把 `cd /d` 塞进 `/TR`；而 `StartWhenAvailable`（错过补跑）与 `ExecutionTimeLimit` 只有 `Register-ScheduledTask` 能显式设。动作直接调用装好的 `.venv/Scripts/notify.exe` 而不是 `uv run`：无人值守的进程不该依赖 `uv` 在 `PATH` 上、也不该在那一刻赌解析器的判断。**只在 Windows 上执行**：路径全部由 `REPO_ROOT` 推导、只用标准库，非 Windows 主机直接拒绝并打印 cron / systemd timer 的等价配方，而不是假装注册成功。
 
 真机注册时踩到三个 PowerShell 的坑，都写进了实现（每一条都会"看起来成功"）：
 
