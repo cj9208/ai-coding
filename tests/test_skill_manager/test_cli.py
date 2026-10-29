@@ -28,7 +28,7 @@ def no_git(monkeypatch):
 
 
 def test_sync_provisions_every_upstream_then_installs(root, no_git):
-    target = root / ".opencode/skills"
+    target = root / ".agents/skills"
     touch_skill(target / "superpowers-_brainstorming")
 
     result = run("sync")
@@ -58,7 +58,7 @@ def test_sync_refuses_to_install_an_incomplete_declaration(root, no_git, monkeyp
         },
     )
     (root / "repo-skills/gamma").mkdir(parents=True)
-    kept = touch_skill(root / ".opencode/skills/beta-proposal")
+    kept = touch_skill(root / ".agents/skills/beta-proposal")
 
     result = run("sync")
 
@@ -74,7 +74,7 @@ def test_sync_accepts_an_upstream_whose_skills_are_all_overridden(root, no_git):
     result = run("sync")
 
     assert result.exit_code == 0, result.output
-    installed = root / ".opencode/skills/beta-proposal"
+    installed = root / ".agents/skills/beta-proposal"
     assert (installed / "SKILL.md").read_text(encoding="utf-8") == "# beta-proposal\n"
     assert "3 skills in" in result.stdout
 
@@ -88,11 +88,11 @@ def test_sync_can_skip_provisioning(root, monkeypatch):
     result = run("sync", "--no-provision")
 
     assert result.exit_code == 0, result.output
-    assert (root / ".opencode/skills/alpha-brainstorming").is_dir()
+    assert (root / ".agents/skills/alpha-brainstorming").is_dir()
 
 
 def test_list_reports_pins_and_installed_names(root):
-    cli.install.install(cli.install.planned(UPSTREAMS), [root / ".opencode/skills"])
+    cli.install.install(cli.install.planned(UPSTREAMS), [root / ".agents/skills"])
 
     result = run("list")
 

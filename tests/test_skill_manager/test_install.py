@@ -32,7 +32,7 @@ def test_planned_refuses_two_upstreams_naming_the_same_skill(root, upstreams):
 
 
 def test_install_rebuilds_the_target_and_prunes_undeclared_names(root, upstreams):
-    target = root / ".opencode/skills"
+    target = root / ".agents/skills"
     touch_skill(target / "alpha-_brainstorming")  # an upstream rename
     touch_skill(target / "beta-proposal")
 
@@ -47,7 +47,7 @@ def test_install_rebuilds_the_target_and_prunes_undeclared_names(root, upstreams
 
 
 def test_install_overwrites_previously_copied_content(root, upstreams):
-    target = root / ".opencode/skills"
+    target = root / ".agents/skills"
     install.install(install.planned(upstreams), [target])
 
     source = root / "repo-skills/alpha/skills/brainstorming/SKILL.md"
@@ -87,7 +87,7 @@ def test_install_copies_the_local_content_into_the_target(root, upstreams):
     local = root / "skills/beta-proposal"
     local.mkdir(parents=True)
     (local / "SKILL.md").write_text("# ours, rewritten\n", encoding="utf-8")
-    target = root / ".opencode/skills"
+    target = root / ".agents/skills"
 
     install.install(install.planned(upstreams), [target])
 

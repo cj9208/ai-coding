@@ -38,6 +38,22 @@ the four remaining questions are recorded as resolved-as-deferred in
 
 ## Verification owed (blocked on this machine)
 
+- [ ] **Four dead ignore entries — sweep them in the same pass as the first real
+      Docker build.** Found 2026-10-29 while moving the skill install target to
+      `.agents/skills/`: `.dockerignore` still lists `opencode/`,
+      `openspec-skills/` and `shell_scipts/`, and `.flake8`'s `exclude` still
+      lists `opencode`. None of the four paths exists in the repo —
+      `openspec-skills/` was deleted by the 2026-09-22 sweep that removed its
+      `.gitignore` line but missed this copy, and the two `opencode` entries lack
+      the leading dot so they never matched `.opencode/` either. Harmless today
+      (a dead exclude only costs a reader's trust), but it is the kind of line
+      that silently stops excluding something the day the path comes back, and
+      the `.flake8` one already reads as if generated trees were being skipped
+      when nothing was. Deferred rather than deleted now because `.dockerignore`
+      has to be read anyway when the build below is finally run — fix all four
+      there, `.flake8` riding along. Re-check first, in case a path came back:
+      `for p in opencode openspec-skills shell_scipts; do [ -e "$p" ] && echo
+      "$p exists"; done`.
 - [ ] **Build the OCR runner image and run one real parse** (Docker Desktop,
       WSL2 backend): `ocr-backend container build` →
       `ocr-backend container download paddleocr-vl-1.6` →

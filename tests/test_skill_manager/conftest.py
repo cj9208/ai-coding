@@ -47,7 +47,7 @@ def root(tmp_path, monkeypatch):
     monkeypatch.setattr(install, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cli, "UPSTREAMS", UPSTREAMS)
-    monkeypatch.setattr(cli, "TARGET_DIRS", (".opencode/skills",))
+    monkeypatch.setattr(cli, "TARGET_DIRS", (".agents/skills",))
 
     skills = tmp_path / "repo-skills/alpha/skills"
     touch_skill(skills / "brainstorming")

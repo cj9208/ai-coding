@@ -3,7 +3,7 @@
 Our own skills, and our differences from the vendored ones. Everything here is
 tracked in git — unlike the upstream clones under `repo-skills/`, which are
 regenerable mirrors and must stay untouched. `uv run skills sync` installs both
-layers into every target directory (`.opencode/skills/` today).
+layers into every target directory (`.agents/skills/` today).
 
 | To | Do |
 | --- | --- |
