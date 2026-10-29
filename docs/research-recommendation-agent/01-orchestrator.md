@@ -132,10 +132,15 @@ src/research_agent/
   clarifying/       # gap selection, question builder, validator
   recommendation/   # profile builder, scorer, report renderer
   contracts/        # pydantic models shared by all (single source of truth)
-  api/              # FastAPI app (v1)
+  persistence/      # db.py / store.py — session store
   cli.py            # MVP driver
 tests/research_agent/
 ```
+
+The store subpackage ships as `persistence/`, not `storage/` — renamed to dodge
+the repo's top-level `storage` package (imports here are top-level, so the two
+would collide). There is no `api/` package: the FastAPI surface stays a v1
+intention, the MVP driver is `cli.py`.
 
 Next: [02-research-agent](./02-research-agent.md) — how the EvidencePack in
 the middle of this machine actually gets built.

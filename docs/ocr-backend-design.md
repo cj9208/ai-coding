@@ -310,7 +310,11 @@ src/ocr_backend/
   contract.py            # OcrDocument 与枚举、SCHEMA_VERSION
   render.py              # page_text / document_markdown
   models.py              # 模型库约定：MODELS 注册表、model_dir(name)、is_ready(dir)
-  cli.py                 # `ocr-backend download <name>`：按注册表一键下载就位
+  cli.py                 # `ocr-backend download <name>`（按注册表一键下载就位）/
+                         # `parse <file> --out <dir>`（一次性跑通：契约 JSON + markdown 投影 +
+                         #   **源文件副本**同落 `--out`，使每个 bundle 自包含——ocr_review 要靠
+                         #   它渲染页面栅格）/ `container build|download|parse [--gpu]`
+                         #   （转发 §Docker 的一次性 runner，省得重敲 compose）
   backends/
     __init__.py          # OcrBackend Protocol（runtime_checkable）
     paddleocr_vl.py      # 适配器：原生 res → OcrDocument；配置；懒加载

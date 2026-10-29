@@ -6,7 +6,7 @@
 
 ## 1. 目标场景
 
-已有的链路是 `ocr-backend parse scan.pdf --out results/` → `<stem>.ocr.json`（契约）+ `<stem>.ocr.md`（投影）。缺的是人对结果的介入：OCR 认错字、把表格切成两段、漏掉一栏、把 caption 判成 paragraph——这些错误机器修不了，人眼扫一遍很快。
+已有的链路是 `ocr-backend parse scan.pdf --out results/` → `<stem>.ocr.json`（契约）+ `<stem>.ocr.md`（投影）+ 源文件副本（三者同目录，bundle 自包含——下面的页面栅格就靠这份副本渲染）。缺的是人对结果的介入：OCR 认错字、把表格切成两段、漏掉一栏、把 caption 判成 paragraph——这些错误机器修不了，人眼扫一遍很快。
 
 构思中的流程：
 
