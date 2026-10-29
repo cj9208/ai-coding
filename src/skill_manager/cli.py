@@ -7,7 +7,7 @@
 
 ``sync`` is the command that makes the layout reproducible: it clones what is
 missing, checks each clone out at its declared commit, and rewrites
-``.opencode/skills`` (and any further target in ``sources.TARGET_DIRS``) from
+``.agents/skills`` (and any further target in ``sources.TARGET_DIRS``) from
 the declared skills — pruning names no longer declared. Provisioning and
 reporting live in :mod:`skill_manager.vendor`, the copying in
 :mod:`skill_manager.install`; this file only maps arguments to those and turns

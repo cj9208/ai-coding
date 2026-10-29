@@ -10,6 +10,7 @@ paddleocr-vl-1.6/
 __pycache__/
 *.pyc
 .git/
+.agents/
 .opencode/
 openspec-skills/
 repo-skills/

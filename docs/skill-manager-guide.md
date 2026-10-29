@@ -2,7 +2,7 @@
 
 > 一句话核心：外部 AI skill 仓库不再手工搬运——本机只留一份进 git 的**声明**（哪个仓库、锁哪个 commit、装哪些），其余全部由 `uv run skills sync` 重建。任何一台干净机器 clone 本仓库后跑一条命令，得到的 skill 目录逐字节相同。
 
-日期：2026-09-21。适用代码：`src/skill_manager/`（`sources.py` / `vendor.py` / `install.py` / `cli.py`），测试 `tests/test_skill_manager/`（20 项，全部离线）。设计缘由见 AGENTS.md "AI skills & specs"；本文讲的是怎么用、出错怎么办。
+日期：2026-09-21（§5 目标目录那条 as-of 2026-10-29）。适用代码：`src/skill_manager/`（`sources.py` / `vendor.py` / `install.py` / `cli.py`），测试 `tests/test_skill_manager/`（21 项，全部离线；重跑：`uv run pytest tests/test_skill_manager -q`）。设计缘由见 AGENTS.md "AI skills & specs"；本文讲的是怎么用、出错怎么办。
 
 ## 0. 一屏图：真源在内，生成物在外
 
@@ -11,7 +11,7 @@
    ┌──────────────────────────────────────┐
    │ src/skill_manager/sources.py         │   vendor.ensure()    ┌─────────────────────────┐
    │   UPSTREAMS = 4 条，每条锁 40 位 sha  ├─────────────────────►│ repo-skills/<clone>/    │
-   │   TARGET_DIRS = (.opencode/skills,)  │   clone + detached   │  = 上游镜像 @ pin        │
+   │   TARGET_DIRS = (.agents/skills,)    │   clone + detached   │  = 上游镜像 @ pin        │
    └──────────────────────────────────────┘     checkout         └────────────┬────────────┘
    ┌──────────────────────────────────────┐                                   │ 扫 */SKILL.md
    │ skills/<install-name>/SKILL.md       │                                   │ 按 select 过滤、
@@ -19,7 +19,7 @@
    └──────────────────┬───────────────────┘                                   ▼
                       │  install.planned()：上游层打底，本地层同名覆盖 ──►  一份计划 list[Skill]
                       ▼
-              install.install()：整目录复制，计划外的名字直接删掉  ──►  .opencode/skills/<name>/  （31 个）
+              install.install()：整目录复制，计划外的名字直接删掉  ──►  .agents/skills/<name>/  （31 个）
 ```
 
 三段职责，对应三个模块：`sources.py` 说"要什么"，`vendor.py` 说"怎么把上游弄到本地"（整个包唯一碰 git 的地方），`install.py` 说"怎么把要的东西摆到工具面前"。`cli.py` 只做参数到这三者的映射，以及把异常翻译成退出码。
@@ -28,7 +28,7 @@
 
 | 命令 | 做什么 | 什么时候用 |
 | --- | --- | --- |
-| `uv run skills sync` | 补齐缺失的 clone → 把它们钉到声明的 commit → 按计划重建每个目标目录（并剪掉不再声明的名字） | 拉到新仓库、改了 `UPSTREAMS`、或发现 `.opencode/skills/` 和声明不一致 |
+| `uv run skills sync` | 补齐缺失的 clone → 把它们钉到声明的 commit → 按计划重建每个目标目录（并剪掉不再声明的名字） | 拉到新仓库、改了 `UPSTREAMS`、或发现 `.agents/skills/` 和声明不一致 |
 | `uv run skills list` | 每个上游的 pin / 实际 checkout / 未提交改动数 / 技能数，加覆盖关系和已装名字清单 | 想知道"现在装的到底是什么" |
 | `uv run skills outdated` | `git fetch` 后报告每个 pin 落后上游默认分支多少 commit、动了哪些 skill 目录 | 想升级之前先看一眼 |
 | `uv run skills add <repo>` | 克隆一个新上游，打印该粘进 `UPSTREAMS` 的那段代码 | 想引入别人维护的一批 skill |
@@ -50,7 +50,7 @@ overrides from the tracked skills/ directory:
   openspec-archive replaces the openspec version
   openspec-proposal replaces the openspec version
 
-.opencode\skills: 31
+.agents\skills: 31
   openspec-proposal
   superpowers-brainstorming
   ...
@@ -80,7 +80,7 @@ overrides from the tracked skills/ directory:
 
 ## 3. 场景手册
 
-**A. 新机器**：`uv sync` 之后 `uv run skills sync`。四个 clone 会按 pin 重新克隆，`.opencode/skills/` 重新生成。已验证过：删掉 clone 再 sync，能原位复原。
+**A. 新机器**：`uv sync` 之后 `uv run skills sync`。四个 clone 会按 pin 重新克隆，`.agents/skills/` 重新生成。已验证过：删掉 clone 再 sync，能原位复原。
 
 **B. 加一个新上游**：`uv run skills add https://github.com/x/y --skills-dir skills --prefix y`，把打印出来的条目粘进 `sources.UPSTREAMS`，然后 `uv run skills sync`，把改动（含 pin）一起提交。
 
@@ -91,7 +91,9 @@ overrides from the tracked skills/ directory:
 
 **E. 升级某个上游**：`uv run skills outdated` 看落后多少、哪些 skill 动了 → `git -C repo-skills/<clone> log --oneline <pin>..<tip>` 自己读一遍 → 把 `sources.py` 里的 `commit` 换成新 sha → `uv run skills sync` → 提交。一个上游更新 = 一次改 `commit` + 一次 sync，**绝不是 `git pull`**：pull 会让这台机器持有仓库不知道的状态。
 
-**F. 换/加一个 agent 工具**：它在哪个目录读 skill，就往 `sources.TARGET_DIRS` 里加一条相对路径。`sync` 会把同一份计划复制到每个目标；被覆盖的目录同样会被剪枝。
+**F. 换/加一个 agent 工具**：先查它在哪个目录读 skill——大概率就是 `.agents/skills/`，那就**什么都不用做**（为什么见 §5 那条"目标目录只有一个"）。只有当某个工具坚持自己的私有路径时，才往 `sources.TARGET_DIRS` 里加一条相对路径；`sync` 会把同一份计划复制到每个目标，每个目标同样按计划剪枝。
+
+加之前必须过一道检查：**没有任何一个 harness 同时扫到两个装着内容的根。** 多份拷贝本身不是问题——它们由同一条命令、同一份计划生成，彼此不可能不一致；问题是重名。OpenCode 项目级同时扫 `.opencode/skills`、`.claude/skills`、`.agents/skills` 三个根，并要求 skill 名跨根唯一，所以再加一条 `.claude/skills` 等于把 31 个名字各送它两份。`.qoder/skills` 不在这三个根里，是目前唯一可以安全新增的。
 
 ## 4. 报错与告警对照
 
@@ -108,10 +110,13 @@ overrides from the tracked skills/ directory:
 
 - **为什么锁 commit 而不是分支 / tag**：可复现，且上游推东西不会改变已提交的状态——和 `uv.lock` 是同一件事。看更新是 `outdated` 的职责，不是安装的职责。
 - **为什么复制而不是软链**：目标目录必须对一个完全不知道 git 存在的 agent 工具有效；链接还把 `repo-skills/` 的结构变成契约的一部分。
+- **为什么目标目录只有 `.agents/skills/` 一个**（as-of 2026-10-29）：它是 Agent Skills 开放标准（agentskills.io）的中立路径，一个目标就喂饱四个 harness——OpenCode / Codex CLI / DeepSeek Harness 按各自官方文档原生扫它，Qoder 是本机实测的：临时建一个 `zz-harness-scan-probe/` 探针技能，下一轮它就出现在 Qoder 的可用技能清单里，`sync` 把它剪掉之后下一轮又消失；反向对照来自同一次会话的开头——那 31 个 skill 当时还躺在 `.opencode/skills/`，Qoder 一个都没列出来。所以这次替换不是"多加一个目标"，是把只服务 OpenCode 的私有路径换成服务四个工具的中立路径，`TARGET_DIRS` 的长度没变。
+  顺带一条可复用的方法：**判断某个 harness 到底扫哪个目录，别只读文档下结论**——文档这次就是过期的（`cj9208.github.io` 仓库 2026-10-26 的 harness 调研里记着"Qoder 不读 `.agents/skills`"，那份文档自己写明失效条件是"任一 harness 的路径约定发生变化"，现在就是）。建一个一次性探针技能，看它出不出现，**两个方向都验**（建了出现、删了消失），比读文档硬。
 - **为什么"剪枝"算安装的一部分**：把目标目录建成计划的**完整视图**，才能顺手解决上游改名留下的僵尸目录——旧 copy 和新 copy 并排存在，正是手工同步的布局不可信的原因。
 - **为什么一个 clone 有本地改动时要报错而不是覆盖**：这台机器上的未提交改动对 git 不可见，`checkout` 会静默吃掉它们。宁可停下来让人决定搬去哪。
 - **为什么扫描靠 `SKILL.md` 而不是清单**：判据来自被 vendored 仓库自己的约定，上游加/删 skill 不需要改本仓库任何代码。
-- **为什么两个生成视图必须待在 index 之外**：`.gitignore` 只对**未跟踪**文件生效——某条路径一旦在加规则之前进过 git，之后每次 `sync` 重写它都会产生一次真实 diff，看起来像有人在手改生成物，而设计的前提是这些目录随时可删可重建。自查一行：`git ls-files repo-skills .opencode` 应当什么都不输出；输出就说明有漏网的，用 `git rm --cached <路径>` 请出去（文件留在磁盘上，`skills sync` 本来就重建得出来）。本仓库的 `.opencode/skills/openspec-{apply,archive,proposal}/SKILL.md` 就是这么三个历史遗留（早于 `.gitignore` 规则），已按此取消跟踪。
+- **为什么两个生成视图必须待在 index 之外**：`.gitignore` 只对**未跟踪**文件生效——某条路径一旦在加规则之前进过 git，之后每次 `sync` 重写它都会产生一次真实 diff，看起来像有人在手改生成物，而设计的前提是这些目录随时可删可重建。自查一行：`git ls-files repo-skills .agents .opencode` 应当什么都不输出；输出就说明有漏网的，用 `git rm --cached <路径>` 请出去（文件留在磁盘上，`skills sync` 本来就重建得出来）。本仓库当年的 `.opencode/skills/openspec-{apply,archive,proposal}/SKILL.md` 就是这么三个历史遗留（早于 `.gitignore` 规则），已按此取消跟踪；那三个文件如今随目标目录一起搬到了 `.agents/skills/` 下，仍然不在 index 里。
+  忽略规则写的是 `.agents/skills/` 而不是整个 `.agents/`：被生成的只有 `skills/` 这一层，忽略整个目录会在日后有人往 `.agents/` 下放一个**想进 git** 的文件时把它静默吃掉。
 
 ## 6. 与 `specs/` 的关系
 
@@ -120,6 +125,6 @@ overrides from the tracked skills/ directory:
 上游那三个 openspec skill 把输出写死在 `openspec/changes/{change-id}/`，而本仓库的证据目录是 `specs/`——这正是 §3 场景 C 那层覆盖的第一批住户：`skills/openspec-{proposal,apply,archive}/` 是上游原件的副本，里面 26 处路径引用统一加了 `specs/` 前缀，于是 `openspec/changes/…` → `specs/openspec/changes/…`、`openspec/specs/` → `specs/openspec/specs/`、`openspec/archive/` → `specs/openspec/archive/`。效果是 skill 一跑就直接落在进 git 的证据目录里，仓库根再也不会冒出一个 `openspec/`，也不需要谁记得事后搬运。
 副作用要说在前面：上游那份仍然写 `openspec/…`，`specs/openspec/` 只是被我们的副本改出来的形状；pin 升级后若想要上游对这三个 skill 的新改动，得重新复制一次再叠上这段路径重定向（`skills outdated` 会告诉你它们有没有动）。`superpowers-*` 的产物没有硬编码路径，仍由人归档到 `specs/superpowers/`。
 
-一句话分清归属：`skills/` 和 `sources.py` 是**源头**，进 git；`repo-skills/`（clone）和 `.opencode/skills/`（安装）是**产物**，gitignored，任何时候删掉都能用 `skills sync` 重建；`specs/` 是这些 skill 做出来的成果，永久留存。
+一句话分清归属：`skills/` 和 `sources.py` 是**源头**，进 git；`repo-skills/`（clone）和 `.agents/skills/`（安装）是**产物**，gitignored，任何时候删掉都能用 `skills sync` 重建；`specs/` 是这些 skill 做出来的成果，永久留存。
 
 重定向之前手工搬进来的那一份（`specs/pdf-summarizer-agent/`）保持原样，不要往 `specs/openspec/` 里迁——按变更命名的历史产物，形状不同不是问题。

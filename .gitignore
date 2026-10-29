@@ -4,6 +4,14 @@ cache/
 logs/
 v/
 repo-skills/
+# both generated, both rebuildable by `skills sync` (src/skill_manager):
+# repo-skills/ is the upstream clone, .agents/skills/ the harness-neutral
+# install target. Only the skills subdir is ignored — .agents/ itself holds
+# nothing else today, and ignoring the whole dir would silently swallow a
+# tracked file added there later.
+.agents/skills/
+# OpenCode's own plugin bootstrap (@opencode-ai/plugin in node_modules); it is
+# no longer a skill target, but the directory stays on disk for OpenCode
 .opencode/
 
 .env

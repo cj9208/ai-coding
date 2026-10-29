@@ -3,7 +3,7 @@
 Which skill came from which repository at which revision is the one fact that
 must not live machine-locally, so it sits here in git while everything derived
 from it (the clones under ``repo-skills/``, the installed copies under
-``.opencode/skills/``) stays gitignored and regenerable: ``skills sync``
+``.agents/skills/``) stays gitignored and regenerable: ``skills sync``
 provisions both from scratch on any machine. Same posture as
 :py:mod:`ocr_backend.models` for model snapshots — a new upstream is one
 entry, an upstream update is one ``commit`` bump.
@@ -73,7 +73,24 @@ UPSTREAMS: dict[str, Upstream] = {
 
 #: Generated skill directories to rebuild, one per agent tool that reads skills
 #: from the workspace. Each is a full view of ``UPSTREAMS`` after a sync.
-TARGET_DIRS: tuple[str, ...] = (".opencode/skills",)
+#:
+#: ``.agents/skills`` is the harness-neutral path of the Agent Skills open
+#: standard (agentskills.io), and one target covers every tool in use here:
+#: OpenCode, Codex CLI and DeepSeek Harness scan it per their docs, and Qoder
+#: was seen scanning it on this machine (2026-10-29: a probe folder showed up in
+#: its skill list on the next turn, while the same 31 skills sitting under the
+#: ``.opencode/skills`` this replaced never showed up at all). The
+#: vendor-specific path therefore bought nothing, and a tool that wants its own
+#: (``.qoder/skills``, ``.claude/skills``) is one more entry here — a second
+#: *copy* costs nothing because every target is rebuilt from the same plan, so
+#: two of them cannot disagree.
+#:
+#: The constraint is on roots, not copies: **no single harness may scan two
+#: populated ones.** OpenCode reads ``.opencode/skills``, ``.claude/skills``
+#: *and* ``.agents/skills``, requiring names to be unique across them, so a
+#: ``.claude/skills`` entry beside this one would hand it 31 duplicates — and
+#: the retired ``.opencode/skills`` had to be deleted, not just abandoned.
+TARGET_DIRS: tuple[str, ...] = (".agents/skills",)
 
 #: First-party skills, tracked in git unlike the clones: a new skill we author
 #: lives here as its own folder, and a folder named exactly as an upstream
