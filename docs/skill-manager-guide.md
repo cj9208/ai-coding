@@ -84,12 +84,12 @@ overrides from the tracked skills/ directory:
 
 **B. 加一个新上游**：`uv run skills add https://github.com/x/y --skills-dir skills --prefix y`，把打印出来的条目粘进 `sources.UPSTREAMS`，然后 `uv run skills sync`，把改动（含 pin）一起提交。
 
-**C. 想改一个已经装上的 vendored skill**：**别去改 `repo-skills/` 里的 clone**，也别说改 `sync` 会迁就你——`sync` 一旦发现 clone 有未提交改动且需要移动它，会直接报错拒绝，以免你的改动被静默丢弃。正确做法：把那个 skill 整个文件夹复制到仓库根的 `skills/` 下，**用它安装时的名字**（含上游前缀），例如 `skills/superpowers-brainstorming/`，然后在那儿改。这层覆盖进 git，`install.planned()` 会让它盖掉同名上游 skill，`skills list` 会列出覆盖关系。仓库里已有三个现成的样子可抄：`skills/openspec-proposal/`、`-apply/`、`-archive/`（见 §6）。
-代价要说清楚：覆盖是**整目录替换**，覆盖期间上游对那个 skill 的后续更新不再生效；pin 升级后如果还想要上游的新变化，得重新复制一次再叠上你的改动。（和 `ocr_review` 的 sidecar 同理：机器产物保持纯净，差异单独可审。）
+**C. 想改一个已经装上的 vendored skill**：**别去改 `repo-skills/` 里的 clone**，也别说改 `sync` 会迁就你——`sync` 一旦发现 clone 有未提交改动且需要移动它，会直接报错拒绝，以免你的改动被静默丢弃。正确做法：把那个 skill 整个文件夹复制到仓库根的 `skills/` 下，**用它安装时的名字**（含上游前缀），例如 `skills/superpowers-brainstorming/`，然后在那儿改，最后在 `sources.OVERRIDE_BASES` 里记一行它是从哪个 commit 剪出来的（§7）。这层覆盖进 git，`install.planned()` 会让它盖掉同名上游 skill，`skills list` 会列出覆盖关系。仓库里已有三个现成的样子可抄：`skills/openspec-proposal/`、`-apply/`、`-archive/`（见 §6）。
+代价要说清楚：覆盖是**整目录替换**，覆盖期间上游对那个 skill 的后续更新不再生效；pin 升级后如果还想要上游的新变化，得重新复制一次再叠上你的改动。"上游已经走过去了"这件事由 `sync` 警告，不用自己盯（§7）。（和 `ocr_review` 的 sidecar 同理：机器产物保持纯净，差异单独可审。）
 
 **D. 我们自己写一个 skill**：放进 `skills/<name>/SKILL.md`，名字不用加前缀（那是我们的地盘），跑 `uv run skills sync`。
 
-**E. 升级某个上游**：`uv run skills outdated` 看落后多少、哪些 skill 动了 → `git -C repo-skills/<clone> log --oneline <pin>..<tip>` 自己读一遍 → 把 `sources.py` 里的 `commit` 换成新 sha → `uv run skills sync` → 提交。一个上游更新 = 一次改 `commit` + 一次 sync，**绝不是 `git pull`**：pull 会让这台机器持有仓库不知道的状态。
+**E. 升级某个上游**：`uv run skills outdated` 看落后多少、哪些 skill 动了（其中哪些是覆盖会被点名）→ `git -C repo-skills/<clone> log --oneline <pin>..<tip>` 自己读一遍 → 把 `sources.py` 里的 `commit` 换成新 sha → `uv run skills sync` → 提交。`sync` 这时会替你检查覆盖有没有被落下（§7）。一个上游更新 = 一次改 `commit` + 一次 sync，**绝不是 `git pull`**：pull 会让这台机器持有仓库不知道的状态。
 
 **F. 换/加一个 agent 工具**：先查它在哪个目录读 skill——大概率就是 `.agents/skills/`，那就**什么都不用做**（为什么见 §5 那条"目标目录只有一个"）。只有当某个工具坚持自己的私有路径时，才往 `sources.TARGET_DIRS` 里加一条相对路径；`sync` 会把同一份计划复制到每个目标，每个目标同样按计划剪枝。
 
@@ -103,6 +103,8 @@ overrides from the tracked skills/ directory:
 | `<a> comes from both <b> and <c> — give one of them a prefix` | 两个上游撞名 | 给其中一个 `Upstream.prefix` |
 | `repo-skills/x has N local edit(s) … would displace them -- move the difference into skills/ as an override, or fork the upstream` | clone 被手改过，且 pin 要求移动它 | 按 §3 场景 C 把差异搬进 `skills/`；差异值得回馈上游就 fork，并把该条目的 `repo` 指向 fork |
 | `warning: … uncommitted edit(s) … recorded nowhere` | 改动会被装出去，但仓库不知道 | 同上，别留给下一台机器 |
+| `no recorded base for override: xxx -- add it to sources.OVERRIDE_BASES` | `skills/` 下有个覆盖，但没记它是从哪个 commit 剪出来的 | 补一行出身（§7）。**这条必须当真**：没有 base 就无法判断漂移，这份覆盖从此脱离检测 |
+| `warning: override xxx was cut from <base> but <upstream>'s copy has changed by <pin>` | pin 已经走过这份覆盖的出身，且上游那个 skill 文件夹的内容确实变了 | 重新复制上游版本、再叠上你的改动，然后把 base 改成新 pin（§7）。刻意要留住旧行为就忽略这次警告，但别忽略第二次 |
 | `git clone …: fatal: repository not found` | URL 错 / 没有网络 / 私有仓库没权限 | 检查 `repo`；`sync` 里某个上游失败会中止整条命令，不会半装 |
 | `git checkout <sha>: reference is not a tree` 之后又成功 | clone 是浅的或旧的 | `ensure()` 已经自己 `fetch`（必要时 `--unshallow`）重试一次，不用管 |
 
@@ -123,8 +125,43 @@ overrides from the tracked skills/ directory:
 真正会写 spec 的只有 5 个：`openspec-proposal` / `-apply` / `-archive`（SDD 工作流）和 `superpowers-brainstorming` / `-writing-plans`。
 
 上游那三个 openspec skill 把输出写死在 `openspec/changes/{change-id}/`，而本仓库的证据目录是 `specs/`——这正是 §3 场景 C 那层覆盖的第一批住户：`skills/openspec-{proposal,apply,archive}/` 是上游原件的副本，里面 26 处路径引用统一加了 `specs/` 前缀，于是 `openspec/changes/…` → `specs/openspec/changes/…`、`openspec/specs/` → `specs/openspec/specs/`、`openspec/archive/` → `specs/openspec/archive/`。效果是 skill 一跑就直接落在进 git 的证据目录里，仓库根再也不会冒出一个 `openspec/`，也不需要谁记得事后搬运。
-副作用要说在前面：上游那份仍然写 `openspec/…`，`specs/openspec/` 只是被我们的副本改出来的形状；pin 升级后若想要上游对这三个 skill 的新改动，得重新复制一次再叠上这段路径重定向（`skills outdated` 会告诉你它们有没有动）。`superpowers-*` 的产物没有硬编码路径，仍由人归档到 `specs/superpowers/`。
+副作用要说在前面：上游那份仍然写 `openspec/…`，`specs/openspec/` 只是被我们的副本改出来的形状；pin 升级后若想要上游对这三个 skill 的新改动，得重新复制一次再叠上这段路径重定向。这三份副本何时算落后、由谁提醒，见 §7——不靠人记。`superpowers-*` 的产物没有硬编码路径，仍由人归档到 `specs/superpowers/`。
 
 一句话分清归属：`skills/` 和 `sources.py` 是**源头**，进 git；`repo-skills/`（clone）和 `.agents/skills/`（安装）是**产物**，gitignored，任何时候删掉都能用 `skills sync` 重建；`specs/` 是这些 skill 做出来的成果，永久留存。
 
 重定向之前手工搬进来的那一份（`specs/pdf-summarizer-agent/`）保持原样，不要往 `specs/openspec/` 里迁——按变更命名的历史产物，形状不同不是问题。
+
+## 7. 覆盖层的漂移检测
+
+§3 场景 C 那句"覆盖期间上游对那个 skill 的后续更新不再生效"，在很长一段时间里只是**写下来**的一句话，没有任何机制支撑——而它恰好是这个仓库里最容易被静默违反的规则：违反它不报错、不失败，只是某天你发现上游的修复没生效，而你不知道是从哪一次 pin 升级开始的。
+
+原来那句"`skills outdated` 会告诉你它们有没有动"只说对了一半，漏掉的正好是会咬人的那一半。`outdated` 报的是**上游动了什么**，而且只在 pin 落后于 tip 时报。覆盖的处境不同：它是某一时刻从 clone 里**复制**出来的副本。`sources.py` 的 pin 一推进、`sync` 一跑，`outdated` 就开始说 up to date，而 `skills/` 下那份副本还是从旧 pin 剪出来的，此刻正盖住上游的新版本——并且再没有任何东西会提起这件事。信号只在升级**之前**亮，升级**之后**永久熄灭。这是最坏的一种时间形状：它在你最需要它的那一刻消失。
+
+补法是让覆盖记住自己的出身。`sources.OVERRIDE_BASES` 把"安装名 → 剪这份副本时上游所在的 commit"和 pin 并排写进 git：
+
+```python
+OVERRIDE_BASES: dict[str, str] = {
+    "openspec-proposal": "092825896ed788b40c7ea987c17f1c5f75ed843a",
+    ...
+}
+```
+
+有了出身，"这份覆盖过期了吗"就变成一个能离线回答的问题。
+
+**判定用的是内容，不是版本号相等。** base 和当前 pin 不同并不等于覆盖过期——pin 可能因为同一上游里别的 skill 动过而推进，被覆盖的那个文件夹一个字节都没变。所以真正的判据是：上游那**一个 skill 文件夹**的内容在 base 和 pin 两个版本之间有没有差异（`vendor.folder_differs`）。两个 revision 都已经在 clone 的历史里（`clone()` 是全量克隆），所以这一步不联网、不 fetch。用版本号相等去判定会狼来了，而一个会狼来了的警告比没有警告更糟——它教会读者忽略这一行。
+
+**三个触发点，各自回答一个不同的问题：**
+
+| 命令 | 回答的问题 | 动作 |
+| --- | --- | --- |
+| `skills sync` | 我现在装出去的这份覆盖，是不是正盖住一个已经变了的上游版本 | 内容漂移 → stderr 警告；`OVERRIDE_BASES` 查无此项 → **中止** |
+| `skills outdated` | 上游动过的那些文件夹里，哪些是覆盖 | 在 changed 清单里点名 |
+| `skills list` | 每份覆盖的出身是哪一版，pin 有没有走过它 | 打印 base，base ≠ pin 时标出 |
+
+`list` 只做声明层的比较（base vs pin，不碰 git），把要读历史的那步留给 `sync`——`sync` 本来就已经把 clone provision 到位了，`list` 则可能在 clone 还没克隆出来的机器上被运行。
+
+**为什么 `sync` 对漂移只警告、对缺失出身却中止**：漂移不会丢东西，覆盖本来就可以是刻意落后的（比如上游改坏了，你就是要留住旧行为），所以决定权在人；而缺失出身是声明本身不完整——没有 base 就无从判断漂移，等于这份覆盖脱离检测，`sync` 装下去只会让"看起来受检、实际不受检"的状态更难发现。这和 `_reject_empty_upstreams` 拦的是同一类错误：声明与事实不符，装下去只会更糟。
+
+**为什么出身记在 `sources.py` 而不是覆盖文件夹里的一个标记文件**：`install()` 是整目录 `copytree`，文件夹里多出来的任何东西都会被复制进每一个安装目标，于是一个只服务于本仓库自检的元数据会出现在 agent 工具实际读取的技能目录里。放进 `sources.py` 还有一层好处：它和 pin 在同一个文件、同一次 diff 里被 review——推进了 pin 却忘了同步 base，在 PR 里是看得见的一行。
+
+**代价要说清楚**：加一个覆盖从一步变成两步（复制文件夹 + 记一行 base），忘了第二步会被 `sync` 当场拦下。换来的是覆盖不再是一个只能靠人记住的静默屏蔽。目前这三份 openspec 覆盖的 base 都等于 openspec 的 pin，上游自 2026-01 起没有新提交，所以检测器上线时报告为零漂移——它是为下一次 pin 升级准备的，不是为今天。

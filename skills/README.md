@@ -8,12 +8,15 @@ layers into every target directory (`.agents/skills/` today).
 | To | Do |
 | --- | --- |
 | add a skill we authored | put it in `skills/<name>/SKILL.md` |
-| change a vendored skill | copy that skill to `skills/<install-name>/` and edit the copy — `<install-name>` is the name it installs under, upstream prefix included, e.g. `skills/superpowers-brainstorming/` |
+| change a vendored skill | copy that skill to `skills/<install-name>/` and edit the copy — `<install-name>` is the name it installs under, upstream prefix included, e.g. `skills/superpowers-brainstorming/` — then record the commit you copied it from in `sources.OVERRIDE_BASES` |
 
 An override replaces the whole folder, not parts of it: while it is in place,
 upstream's later changes to that skill stop taking effect, so re-copy after a
-pin bump if you want them. `skills list` reports which installed names come
-from here.
+pin bump if you want them. That is not left to memory — `OVERRIDE_BASES` says
+which upstream revision each copy was cut from, `skills sync` refuses an
+override with no recorded base and warns when upstream's copy of that folder
+has moved past it, and `skills list` reports which installed names come from
+here. `docs/skill-manager-guide.md` §7 covers why the check is content-based.
 
 Currently here as overrides: `openspec-proposal`, `openspec-apply`,
 `openspec-archive` — upstream's copies hard-code their output to
