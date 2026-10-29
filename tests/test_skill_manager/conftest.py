@@ -28,6 +28,11 @@ UPSTREAMS: dict[str, Upstream] = {
     ),
 }
 
+#: The override the fixtures use (``skills/beta-proposal``) cut from beta's own
+#: pin, so the default world has a well-formed declaration and reports no
+#: drift. Tests that want staleness re-point one of these.
+OVERRIDE_BASES: dict[str, str] = {"beta-proposal": "b" * 40}
+
 
 def touch_skill(directory) -> object:
     directory.mkdir(parents=True, exist_ok=True)
@@ -48,6 +53,7 @@ def root(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cli, "UPSTREAMS", UPSTREAMS)
     monkeypatch.setattr(cli, "TARGET_DIRS", (".agents/skills",))
+    monkeypatch.setattr(cli, "OVERRIDE_BASES", OVERRIDE_BASES)
 
     skills = tmp_path / "repo-skills/alpha/skills"
     touch_skill(skills / "brainstorming")

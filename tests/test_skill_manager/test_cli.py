@@ -102,6 +102,101 @@ def test_list_reports_pins_and_installed_names(root):
     assert "beta-proposal" in out
 
 
+def test_sync_refuses_an_override_with_no_recorded_base(root, no_git, monkeypatch):
+    """No base means nothing can ever tell whether this override has drifted,
+    which is worse than having no check at all -- so it must not install as if
+    it were watched."""
+    monkeypatch.setattr(cli, "OVERRIDE_BASES", {})
+    touch_skill(root / "skills/beta-proposal")
+    kept = touch_skill(root / ".agents/skills/alpha-brainstorming")
+
+    result = run("sync")
+
+    assert result.exit_code == 1
+    assert "no recorded base for override: beta-proposal" in result.stderr
+    assert "OVERRIDE_BASES" in result.stderr
+    assert kept.is_dir(), "a failed sync must leave the install untouched"
+
+
+def test_sync_warns_but_still_installs_when_the_pin_moved_past_an_override(
+    root, no_git, monkeypatch
+):
+    """Deliberately staying behind is legitimate, so this warns rather than
+    refuses -- unlike the missing base above, nothing is lost here."""
+    monkeypatch.setattr(cli, "OVERRIDE_BASES", {"beta-proposal": "0" * 40})
+    monkeypatch.setattr(vendor, "folder_differs", lambda *args: True)
+    touch_skill(root / "skills/beta-proposal")
+
+    result = run("sync")
+
+    assert result.exit_code == 0, result.output
+    assert "override beta-proposal was cut from 0000000" in result.stderr
+    assert "changed by bbbbbbb" in result.stderr
+    assert (root / ".agents/skills/beta-proposal").is_dir()
+
+
+def test_sync_stays_quiet_when_the_pin_moved_but_the_folder_did_not(
+    root, no_git, monkeypatch
+):
+    monkeypatch.setattr(cli, "OVERRIDE_BASES", {"beta-proposal": "0" * 40})
+    monkeypatch.setattr(vendor, "folder_differs", lambda *args: False)
+    touch_skill(root / "skills/beta-proposal")
+
+    result = run("sync")
+
+    assert result.exit_code == 0, result.output
+    assert "warning" not in result.stderr
+
+
+def test_list_reports_where_an_override_was_cut_from(root):
+    touch_skill(root / "skills/beta-proposal")
+
+    result = run("list")
+
+    assert result.exit_code == 0, result.output
+    assert "beta-proposal replaces the beta version (base bbbbbbb = pin)" in (
+        result.stdout
+    )
+
+
+def test_list_flags_an_override_whose_pin_has_moved(root, monkeypatch):
+    monkeypatch.setattr(cli, "OVERRIDE_BASES", {"beta-proposal": "0" * 40})
+    touch_skill(root / "skills/beta-proposal")
+
+    result = run("list")
+
+    assert result.exit_code == 0, result.output
+    assert "base 0000000, pin bbbbbbb moved" in result.stdout
+
+
+def test_outdated_names_the_overrides_a_bump_would_shadow(root, monkeypatch):
+    touch_skill(root / "skills/beta-proposal")
+
+    def fake_check(upstream):
+        if upstream.clone == "repo-skills/beta":
+            return vendor.Update(tip="c" * 7, behind=2, changed=["beta-proposal"])
+        return vendor.Update(tip="c" * 7, behind=0, changed=[])
+
+    monkeypatch.setattr(vendor, "check_updates", fake_check)
+
+    result = run("outdated")
+
+    assert result.exit_code == 0, result.output
+    assert "overrides to re-copy before bumping: beta-proposal" in result.stdout
+
+
+def test_outdated_stays_quiet_about_folders_nobody_overrides(root, monkeypatch):
+    def fake_check(upstream):
+        return vendor.Update(tip="c" * 7, behind=1, changed=["beta-proposal"])
+
+    monkeypatch.setattr(vendor, "check_updates", fake_check)
+
+    result = run("outdated")
+
+    assert result.exit_code == 0, result.output
+    assert "overrides to re-copy" not in result.stdout
+
+
 def test_add_prints_the_declaration_to_paste(root, monkeypatch):
     cloned: list[str] = []
 

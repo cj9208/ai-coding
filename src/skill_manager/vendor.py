@@ -122,6 +122,38 @@ def _changed_skills(upstream: Upstream, tip: str) -> list[str]:
     return sorted(folders - {""})
 
 
+def folder_differs(upstream: Upstream, folder: str, older: str, newer: str) -> bool:
+    """Whether one skill folder's contents differ between two revisions.
+
+    Offline and cheap: :func:`clone` keeps full history, so both revisions are
+    already in the clone and nothing is fetched. The question this answers is
+    whether an override copied at ``older`` is missing changes that landed by
+    ``newer`` — comparing the two revisions for equality instead would report
+    drift on every pin bump that merely touched some *other* skill of the same
+    upstream, and a warning that cries wolf teaches the reader to skip it.
+
+    An unknown revision surfaces as :class:`GitError` rather than as "no
+    difference": a base nobody can resolve means the override is unchecked, and
+    that must not read as clean.
+    """
+    scope = (
+        PurePosixPath(upstream.skills_dir) / folder
+        if upstream.skills_dir
+        else PurePosixPath(folder)
+    )
+    return bool(
+        _git(
+            "diff",
+            "--name-only",
+            older,
+            newer,
+            "--",
+            str(scope),
+            cwd=upstream.clone_dir,
+        )
+    )
+
+
 def _folder(path: str, skills_dir: str) -> str:
     """The skill folder a changed file belongs to, inside ``skills_dir``."""
     depth = len(PurePosixPath(skills_dir).parts) if skills_dir else 0

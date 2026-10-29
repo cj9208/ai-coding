@@ -156,9 +156,10 @@ machine** (no Docker Desktop here; the wrapper's unit tests fake `subprocess.run
   decoding and the rationale: sync / list / outdated / add, updating a pin,
   adding an upstream or an install target, and re-copying overrides.
 - The declaration is tracked: `sources.UPSTREAMS` (one entry per repository, each
-  pinned to a **full commit sha**) and `sources.TARGET_DIRS`. An upstream update
-  is a `commit` bump plus `skills sync`, **never a `git pull`** — a pull leaves
-  the machine holding state the repo knows nothing about.
+  pinned to a **full commit sha**), `sources.TARGET_DIRS`, and
+  `sources.OVERRIDE_BASES`. An upstream update is a `commit` bump plus
+  `skills sync`, **never a `git pull`** — a pull leaves the machine holding state
+  the repo knows nothing about.
 - `.agents/skills` is the single install target because it is harness-neutral.
   Another tool that needs its own path is one `sources.TARGET_DIRS` entry — but
   **never a second root some harness also scans**: OpenCode reads
@@ -170,7 +171,9 @@ machine** (no Docker Desktop here; the wrapper's unit tests fake `subprocess.run
 - A clone is a mirror, so local differences go to the tracked **`skills/`**
   directory: a folder named as the skill *installs* (`superpowers-brainstorming`,
   prefix included) replaces it in every target, which is how an edit survives the
-  next pin bump.
+  next pin bump. An override **must** record the commit it was cut from in
+  `sources.OVERRIDE_BASES` — `skills sync` refuses one that does not, and warns
+  when upstream's copy of that folder has changed since (guide §7).
 - The spec-writing skills (`openspec-proposal` / `-apply` / `-archive`,
   `superpowers-brainstorming` / `-writing-plans`) produce material archived under
   **`specs/`**, keyed by the tool or change that authored it. Upstream's openspec

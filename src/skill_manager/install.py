@@ -11,7 +11,7 @@ hand-synced layout untrustworthy.
 """
 
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -31,6 +31,25 @@ class Skill(NamedTuple):
     name: str
     upstream: str
     overrides: str = ""
+    #: The folder name inside the upstream's ``skills_dir`` — ``name`` with the
+    #: upstream's prefix taken back off. An override needs it to ask the clone
+    #: about *its* upstream original, which is not named after the override's own
+    #: folder whenever a prefix is involved: ``superpowers-brainstorming``
+    #: shadows a folder called ``brainstorming``.
+    upstream_folder: str = ""
+
+
+class StaleOverride(NamedTuple):
+    """An override whose upstream original has moved on since it was copied."""
+
+    name: str
+    upstream: str
+    base: str
+    pin: str
+
+
+#: whether one upstream skill folder's contents differ between two revisions
+Differs = Callable[[Upstream, str, str, str], bool]
 
 
 class Target(NamedTuple):
@@ -60,12 +79,67 @@ def planned(
                     f"{skill_name} comes from both {by_name[skill_name].upstream} and "
                     f"{name} -- give one of them a prefix"
                 )
-            by_name[skill_name] = Skill(folder, skill_name, name)
+            by_name[skill_name] = Skill(
+                folder, skill_name, name, upstream_folder=folder.name
+            )
     for folder in skill_folders(own_dir):
         shadowed = by_name.get(folder.name)
         overrides = shadowed.upstream if shadowed else ""
-        by_name[folder.name] = Skill(folder, folder.name, LOCAL, overrides)
+        by_name[folder.name] = Skill(
+            folder,
+            folder.name,
+            LOCAL,
+            overrides,
+            # the shadowed skill's own folder name, not ours: with a prefix in
+            # play the two differ, and it is the upstream one that exists in the
+            # clone a drift check reads
+            upstream_folder=shadowed.upstream_folder if shadowed else folder.name,
+        )
     return [by_name[name] for name in sorted(by_name)]
+
+
+def missing_bases(skills: Sequence[Skill], bases: Mapping[str, str]) -> list[str]:
+    """Overrides whose base revision was never recorded.
+
+    Not a cosmetic gap: without a base there is nothing to compare against, so
+    the override drifts undetected forever while still looking declared. That is
+    worse than having no check at all, which is why ``sync`` treats it as a
+    broken declaration rather than a warning.
+    """
+    return sorted(s.name for s in skills if s.overrides and s.name not in bases)
+
+
+def stale_overrides(
+    skills: Sequence[Skill],
+    upstreams: Mapping[str, Upstream],
+    bases: Mapping[str, str],
+    differs: Differs,
+) -> list[StaleOverride]:
+    """Overrides that no longer reflect the pin they are installed against.
+
+    ``differs`` answers whether one upstream skill folder changed between two
+    revisions; injecting it keeps this module free of git, and the caller passes
+    :func:`vendor.folder_differs`. An override whose base *is* the current pin
+    cannot have drifted and is skipped without asking — the common case, and the
+    reason the check costs nothing while nothing has moved.
+
+    Assumes every override has a base: :func:`missing_bases` is the guard that
+    runs first, so a missing one is a declaration error rather than something to
+    report here as clean.
+    """
+    stale: list[StaleOverride] = []
+    for skill in skills:
+        if not skill.overrides:
+            continue
+        base = bases[skill.name]
+        upstream = upstreams[skill.overrides]
+        if base == upstream.commit:
+            continue
+        if differs(upstream, skill.upstream_folder, base, upstream.commit):
+            stale.append(
+                StaleOverride(skill.name, skill.overrides, base, upstream.commit)
+            )
+    return stale
 
 
 def skill_folders(directory: Path, select: str = "") -> list[Path]:
