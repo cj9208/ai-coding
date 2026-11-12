@@ -118,6 +118,15 @@ merged under the rule.
   and the two live tests (`test_summarize_live`, the OCR live file) self-skip
   on their env/file triggers. A 401 in `test_summarize_live` *locally* means a
   stale key — environment, not regression.
+- **photo_desk move-interruption recovery is an offline gate:** the regressions
+  in `tests/test_photo_desk` inject a post-rename commit failure or a simulated
+  process exit on the real call chain, in both quarantine and restore
+  directions; a persisted pending intent must remain, `recover_moves`
+  reconciles DB-only (ambiguous scenes stay pending, both ends' bytes
+  untouched), and pending intents block scan/triage/restore. No credentials or
+  NAS needed, so CI runs them. They prove the mechanism on tmp_path — not SMB
+  power-loss durability or concurrent-writer safety; the real drill stays owed
+  in the L3 table and TODO.md.
 
 `push` triggers CI on `main`; there is no deploy stage because there is nothing
 hosted to deploy — the honest CD for this repo would be a GHCR publish of
@@ -135,7 +144,7 @@ owner row in `TODO.md` so "not yet verified" stays a debt, not a myth:
 | pdf_summarizer live LLM | `LLM_API_KEY` in `.env`, then `uv run pytest tests/test_pdf_summarizer/test_summarizer.py` | runs when a key is present; 401 = stale key |
 | PaddleOCR-VL end-to-end | `OCR_LIVE=1` + snapshot from `ocr-backend download paddleocr-vl-1.6` | model-free golden tests cover the contract; live parse is this file's job |
 | Docker OCR runner | `ocr-backend container build\|download\|parse [--gpu]` on a Docker Desktop host | **never verified end-to-end** — unit tests fake `subprocess.run`; TODO.md |
-| photo_desk HEIC + NAS | real device tree mounted at `PHOTO_ROOT` | acceptance debt recorded in TODO.md (both M0 and M1 lines) |
+| photo_desk HEIC + NAS | real device tree mounted at `PHOTO_ROOT` | acceptance debt recorded in TODO.md (M0/M1 lines + the interruption-recovery drill on a controlled copy); the offline fault-injection gate above does not substitute |
 | quantdesk WS recording | a network where fstream actually pushes | live-verified gap: this machine's WS is silent; liquidation *positive* path awaits TODO.md |
 | notify Telegram delivery | real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, then `uv run notify emit … --severity alert && uv run notify schedule run-now && uv run notify schedule status` | **verified 2026-09-23** — four acceptance items on a real phone, plus one *unattended* round launched by the registered Task Scheduler (`LastTaskResult 0`, log tail in `data/notify/dispatch.log`); owed: the closed-lid sleep-wake catch-up (TODO.md) |
 | exam_builder composed paper | `uv run exam compose --ids … --out paper.docx`, then open it in real Word | package integrity is machine-checked (every `r:embed`/`r:id` resolves to a part that exists, OLE+WMF present, zip clean); **the Word-side eyeball check of formula/figure fidelity is still owed** — code can prove the parts are there, not that Word renders them |

@@ -122,6 +122,15 @@ the four remaining questions are recorded as resolved-as-deferred in
       (`burst_id`) ships as constant None until a real Apple BurstIdentifier is
       confirmed readable, so on-device bursts currently lean on the
       EXIF-millisecond rule — verify it actually fires on iPhone bursts.
+      Also owed: one real interruption-recovery drill on a controlled NAS copy
+      with its own `--data-dir` (never the only originals): kill a
+      `photos triage --apply` and a `photos restore` after the rename, then
+      `uv run photos recover --root <copy> --data-dir <copy-db>` and confirm
+      the ledger reconciles without moving files and both ends' bytes are
+      unchanged. The offline fault-injection regressions
+      (`tests/test_photo_desk/test_triage.py`, `test_cli.py`) prove the
+      mechanism on tmp_path only; SMB power-loss durability and concurrent
+      writers are explicitly out of scope.
 
 - [ ] **exam_builder: open one composed paper in real Word.** M0+M1 shipped
       2026-10-17 and package integrity is machine-checked (every `r:embed`/`r:id`
