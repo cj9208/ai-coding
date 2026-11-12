@@ -1,8 +1,9 @@
 """筛查与放回：全系统唯一的写通道（设计文档 §4.2 / §4.3 / §4.4）。
 
-原件字节永不改写（D-5）——这里只做"移动"，且每次移动必须在
-``move_ledger`` 落一行；放回前先按账本里的 sha256 验身。**dry-run 是默认**，
-``--apply`` 是"只看清单"与"真动文件"之间唯一的分界线。
+原件字节永不改写（D-5）——这里只做"移动"，且每次移动都按"提交意图 →
+移动 → 提交完成"在 ``move_ledger`` 落行，中断留下可对账的 pending 意图
+（``photos recover`` 只补账、不动文件）；放回前先按账本里的 sha256 验身。
+**dry-run 是默认**，``--apply`` 是"只看清单"与"真动文件"之间唯一的分界线。
 
 判定是组内相对排名（§4.4）：分数 < 0.5×组内最佳 才隔离，绝不用绝对
 阈值——场景光照差足以淹没"模糊"信号。独张照片不参与自动判定；
@@ -25,6 +26,7 @@ from .library import (
     MoveLedger,
     Photo,
     new_blurred_name,
+    require_no_pending_moves,
     utcnow,
 )
 from .scan import sha256_file
@@ -61,6 +63,7 @@ def build_plan(settings: Settings, session: Session) -> TriageReport:
     只读原件、只写库；不动文件系统。
     """
     settings.ensure_root()
+    require_no_pending_moves(session)
     photos = list(
         session.scalars(
             select(Photo).where(Photo.state == STATE_IN_PLACE).order_by(Photo.id)
@@ -121,13 +124,64 @@ def build_plan(settings: Settings, session: Session) -> TriageReport:
     return report
 
 
+def _finish_move(entry: MoveLedger, row: Photo, *, restoring: bool) -> None:
+    """移动确认后的状态翻转：只改 ORM，不自行提交。"""
+    if restoring:
+        row.rel_path = entry.rel_from
+        row.state = STATE_IN_PLACE
+        entry.phase = "restored"
+        entry.restored_at = utcnow()
+    else:
+        row.rel_path = entry.rel_to
+        row.state = STATE_QUARANTINED
+        entry.phase = "quarantined"
+        entry.moved_at = utcnow()
+    entry.restore_error = None
+
+
+def _execute_move(
+    settings: Settings,
+    session: Session,
+    entry: MoveLedger,
+    row: Photo,
+    *,
+    restoring: bool,
+) -> None:
+    """提交意图 → 移动 → 提交完成。无论中断在哪一步，账本都留下可对账现场。"""
+    rel_src, rel_dest = (
+        (entry.rel_to, entry.rel_from) if restoring else (entry.rel_from, entry.rel_to)
+    )
+    src = settings.photo_path(rel_src)
+    dest = settings.photo_path(rel_dest)
+    if src.is_symlink() or not src.is_file():
+        raise RuntimeError(f"源文件不可移动: {rel_src}")
+    if dest.exists() or dest.is_symlink():
+        raise RuntimeError(f"目标已被占用，拒绝覆盖: {rel_dest}")
+    if sha256_file(src) != entry.sha256:
+        raise RuntimeError(f"sha256 不符，拒绝移动: {rel_src}")
+    entry.phase = "restore_pending" if restoring else "quarantine_pending"
+    session.add(entry)
+    session.commit()
+    try:
+        # 单维护写者前提下再检查一次；不宣称可抵抗外部并发写入。
+        if dest.exists() or dest.is_symlink():
+            raise RuntimeError(f"目标已被占用，拒绝覆盖: {rel_dest}")
+        src.rename(dest)
+        _finish_move(entry, row, restoring=restoring)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+
 def apply_plan(settings: Settings, session: Session, moves: list[Move]) -> int:
-    """执行隔离：rename 进 blurred/ + 账本落行 + 状态翻转。
+    """执行隔离：意图先落盘 → rename 进 blurred/ → 账本确认 + 状态翻转。
 
     ``Photo.rel_path`` 始终跟**当前**位置（详情/缩略图靠它找文件），
     原始位置保存在账本 ``rel_from`` 里供放回。
     """
     settings.ensure_root()
+    require_no_pending_moves(session)
     settings.blurred_dir.mkdir(parents=True, exist_ok=True)
     moved = 0
     for mv in moves:
@@ -139,23 +193,16 @@ def apply_plan(settings: Settings, session: Session, moves: list[Move]) -> int:
         if not src.is_file():
             print(f"跳过 {mv.rel_from}：目录里没有这个文件，请先 photos scan")
             continue
-        dest = settings.photo_path(mv.rel_to)
-        src.rename(dest)
-        session.add(
-            MoveLedger(
-                photo_id=row.id,
-                rel_from=mv.rel_from,
-                rel_to=mv.rel_to,
-                sha256=row.content_hash,
-                reason="blur_rank",
-                group_id=mv.group_id,
-            )
+        entry = MoveLedger(
+            photo_id=row.id,
+            rel_from=mv.rel_from,
+            rel_to=mv.rel_to,
+            sha256=row.content_hash,
+            reason="blur_rank",
+            group_id=mv.group_id,
         )
-        row.rel_path = mv.rel_to
-        row.state = STATE_QUARANTINED
+        _execute_move(settings, session, entry, row, restoring=False)
         moved += 1
-    if moved:
-        session.commit()
     return moved
 
 
@@ -179,65 +226,118 @@ def restore(
     - sha256 与账本不符（有人在隔离区动过字节）→ 记 ``restore_error``，不放回；
     - 原父目录已被删 → 重建后放回，``note='recreated_parent'``（孤儿可救）；
     - 原位置已被别的文件占用 → 拒绝覆盖，绝不销毁未知数据。
+
+    业务拒绝仍返回 outcome；真正的 I/O/commit 故障中止本批并保留 pending
+    意图，前面已完成的照片不回滚伪装成全批失败未发生。
     """
     settings.ensure_root()
     if photo_id is None and group_id is None:
         raise ValueError("restore 需要指定 photo_id 或 group_id")
-
-    stmt = select(MoveLedger).where(MoveLedger.restored_at.is_(None))
+    require_no_pending_moves(session)
+    stmt = select(MoveLedger).where(
+        MoveLedger.restored_at.is_(None), MoveLedger.phase == "quarantined"
+    )
     if photo_id is not None:
         stmt = stmt.where(MoveLedger.photo_id == photo_id)
     if group_id is not None:
         stmt = stmt.where(MoveLedger.group_id == group_id)
     entries = list(session.scalars(stmt.order_by(MoveLedger.id)))
-
     outcomes: list[RestoreOutcome] = []
-    did_work = False
     for entry in entries:
         cur = settings.photo_path(entry.rel_to)
-        outcome = RestoreOutcome(
-            photo_id=entry.photo_id,
-            rel_in_blurred=entry.rel_to,
-            restored=False,
-            detail="",
-        )
-        outcomes.append(outcome)
-
-        if not cur.is_file():
-            entry.restore_error = "blurred 区里找不到该文件"
-            outcome.detail = entry.restore_error
-            did_work = True
-            continue
-        digest = sha256_file(cur)
-        if digest != entry.sha256:
-            entry.restore_error = f"sha256 不符（内容被改过）: {digest[:12]}…"
-            outcome.detail = entry.restore_error
-            did_work = True
-            continue
         dest = settings.photo_path(entry.rel_from)
-        if dest.exists():
-            entry.restore_error = "原位置已被占用，拒绝覆盖"
-            outcome.detail = entry.restore_error
-            did_work = True
+        row = session.get(Photo, entry.photo_id)
+        outcome = RestoreOutcome(entry.photo_id, entry.rel_to, False, "")
+        outcomes.append(outcome)
+        error = None
+        if cur.is_symlink() or not cur.is_file():
+            error = "blurred 区里找不到可用的普通文件"
+        elif sha256_file(cur) != entry.sha256:
+            error = "sha256 不符（内容被改过）"
+        elif dest.exists() or dest.is_symlink():
+            error = "原位置已被占用，拒绝覆盖"
+        elif row is None or row.rel_path != entry.rel_to:
+            error = "照片记录与账本不符，拒绝放回"
+        elif row.content_hash != entry.sha256 or row.state != STATE_QUARANTINED:
+            error = "照片身份或状态与账本不符，拒绝放回"
+        if error is not None:
+            entry.restore_error = error
+            outcome.detail = error
+            session.commit()
             continue
-
-        note: str | None = None
+        assert row is not None
         if not dest.parent.is_dir():
             dest.parent.mkdir(parents=True, exist_ok=True)
-            note = "recreated_parent"
-        cur.rename(dest)
-        entry.restored_at = utcnow()
-        entry.note = note
-        row = session.get(Photo, entry.photo_id)
-        if row is not None:
-            row.rel_path = entry.rel_from
-            row.state = STATE_IN_PLACE
+            entry.note = "recreated_parent"
+        _execute_move(settings, session, entry, row, restoring=True)
         outcome.restored = True
-        outcome.detail = "放回 " + entry.rel_from + (f"（{note}）" if note else "")
-        did_work = True
+        suffix = f"（{entry.note}）" if entry.note else ""
+        outcome.detail = "放回 " + entry.rel_from + suffix
+    return outcomes
 
-    if did_work:
+
+@dataclass
+class RecoveryOutcome:
+    ledger_id: int
+    resolved: bool
+    detail: str
+
+
+def recover_moves(settings: Settings, session: Session) -> list[RecoveryOutcome]:
+    """对账中断的移动：只核验两端并补记数据库，绝不移动或覆盖文件。
+
+    结论只基于账本已记录的两个路径，不遍历磁盘猜原件。歧义现场（两端
+    同在/同缺、哈希不符、符号链接、Photo 身份不符）保留 pending、两端
+    字节不动，交人工核定；对账时间是确认时间，不冒充精确 rename 时刻。
+    """
+    settings.ensure_root()
+    entries = list(
+        session.scalars(
+            select(MoveLedger)
+            .where(MoveLedger.phase.in_(("quarantine_pending", "restore_pending")))
+            .order_by(MoveLedger.id)
+        )
+    )
+    outcomes: list[RecoveryOutcome] = []
+    for entry in entries:
+        restoring = entry.phase == "restore_pending"
+        rel_src, rel_dest = (
+            (entry.rel_to, entry.rel_from)
+            if restoring
+            else (entry.rel_from, entry.rel_to)
+        )
+        src = settings.photo_path(rel_src)
+        dest = settings.photo_path(rel_dest)
+        try:
+            row = session.get(Photo, entry.photo_id)
+            if (
+                row is None
+                or row.content_hash != entry.sha256
+                or row.rel_path not in (entry.rel_from, entry.rel_to)
+            ):
+                raise ValueError("Photo 身份/路径与账本不符")
+            if src.is_symlink() or dest.is_symlink():
+                raise ValueError("路径含符号链接，需人工核对")
+            src_exists, dest_exists = src.exists(), dest.exists()
+            if src_exists == dest_exists:
+                raise ValueError("两端同时存在或同时缺失，需人工核对")
+            actual = src if src_exists else dest
+            if not actual.is_file() or sha256_file(actual) != entry.sha256:
+                raise ValueError("实际文件 sha256 不符或不是普通文件")
+        except (OSError, ValueError) as exc:
+            outcomes.append(RecoveryOutcome(entry.id, False, str(exc)))
+            continue
+        if dest_exists:
+            _finish_move(entry, row, restoring=restoring)
+            detail = "按文件现状补记移动完成"
+        else:
+            entry.phase = "quarantined" if restoring else "cancelled"
+            row.rel_path = rel_src
+            row.state = STATE_QUARANTINED if restoring else STATE_IN_PLACE
+            entry.restore_error = None
+            detail = "移动未发生，已撤销意图；未移动任何文件"
         session.commit()
+        outcomes.append(RecoveryOutcome(entry.id, True, detail))
     return outcomes
 
 

@@ -1,4 +1,4 @@
-"""``photos`` CLI — scan / serve（M0）+ triage / restore（M1 写通道）。
+"""``photos`` CLI — scan / serve（M0）+ triage / restore（M1 写通道）+ recover（对账）。
 
 photos scan                        # 增量清点（PHOTO_ROOT / env 可覆盖）
 photos scan --root Z:/photo --data-dir D:/pd-out
@@ -6,6 +6,7 @@ photos triage                      # dry-run：连拍归组+评分，只打印�
 photos triage --apply              # 执行：移入 blurred/ 并写账本
 photos restore --photo 42          # 单张放回（sha256 验身后）
 photos restore --group a1b2c3d4e5f6  # 整组放回
+photos recover                     # 对账中断的移动：只补账，不移动/覆盖文件
 photos serve [--port 8790]         # 时间线 Web UI
 """
 
@@ -142,6 +143,34 @@ def restore(
         failed += 0 if o.restored else 1
     click.echo(f"共 {len(outcomes)} 张，失败 {failed} 张")
     raise SystemExit(1 if failed else 0)
+
+
+@cli.command("recover")
+@_common_options
+@_clean_errors
+def recover_cmd(root: str | None, data_dir: str | None) -> None:
+    """核对中断的移动并补账；不移动或覆盖文件。"""
+    settings = load_settings(root, data_dir)
+    from storage import SqliteClient
+
+    from .library import ensure_schema
+    from .triage import recover_moves
+
+    settings.ensure_writable_dirs()
+    storage = SqliteClient(settings.db_path)
+    try:
+        ensure_schema(storage)
+        with storage.session() as db:
+            outcomes = recover_moves(settings, db)
+        for outcome in outcomes:
+            tag = "已对清" if outcome.resolved else "需人工核对"
+            click.echo(f"{outcome.ledger_id} {tag}: {outcome.detail}")
+        if not outcomes:
+            click.echo("没有待对账移动。")
+        if any(not outcome.resolved for outcome in outcomes):
+            raise click.ClickException("仍有未对清账本；禁止继续扫描或移动")
+    finally:
+        storage.dispose()
 
 
 @cli.command()
