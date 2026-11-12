@@ -103,3 +103,67 @@ def test_export_end_to_end(client, ws_id, tmp_path):
 def test_unknown_workspace_404(client):
     assert client.get("/api/w/deadbeefcafe/document").status_code == 404
     assert client.get("/w/deadbeefcafe").status_code == 404
+
+
+@pytest.mark.parametrize("operation", ["load", "save", "export"])
+def test_stale_review_rejected_without_rewriting_artifacts(
+    client,
+    ws_id,
+    bundle,
+    tmp_path,
+    operation,
+):
+    import json
+
+    payload = client.get(f"/api/w/{ws_id}/document").json()["review"]
+    payload["pages"] = [
+        {
+            "page_index": 0,
+            "status": "done",
+            "entries": {
+                "0": {"state": "corrected", "content": "Correction for OLD block"}
+            },
+        }
+    ]
+    saved = client.put(f"/api/w/{ws_id}/review", json={"review": payload})
+    assert saved.status_code == 200
+    base = saved.json()["updated_at"]
+    assert client.post(f"/api/w/{ws_id}/export").status_code == 200
+    work = tmp_path / "work" / ws_id
+    protected = [
+        work / "review.json",
+        work / "meta.json",
+        work / "pages" / "page-000.png",
+        *sorted((work / "export").iterdir()),
+    ]
+    before = {str(p): p.read_bytes() for p in protected}
+    changed = json.loads(bundle["json"].read_text(encoding="utf-8"))
+    changed["pages"][0]["blocks"][0]["content"] = "NEW unrelated block with reused ID"
+    bundle["json"].write_text(json.dumps(changed), encoding="utf-8")
+    if operation == "load":
+        response = client.get(f"/api/w/{ws_id}/document")
+    elif operation == "save":
+        response = client.put(
+            f"/api/w/{ws_id}/review",
+            json={"review": payload, "base_updated_at": base},
+        )
+    else:
+        response = client.post(f"/api/w/{ws_id}/export")
+    assert response.status_code == 409
+    assert response.json()["code"] == "stale_ocr"
+    assert "版本" in response.json()["detail"]
+    assert {str(p): p.read_bytes() for p in protected} == before
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "版本变化，需重新核对" in page.text
+
+
+@pytest.mark.parametrize(
+    "field", ["ocr_json_sha256", "source_sha256", "model", "pipeline_version"]
+)
+def test_wrong_target_rejected_on_first_save(client, ws_id, field, tmp_path):
+    payload = client.get(f"/api/w/{ws_id}/document").json()["review"]
+    payload["target"][field] = "wrong"
+    response = client.put(f"/api/w/{ws_id}/review", json={"review": payload})
+    assert response.status_code == 409
+    assert not (tmp_path / "work" / ws_id / "review.json").exists()

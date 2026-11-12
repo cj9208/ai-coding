@@ -127,6 +127,16 @@ merged under the rule.
   NAS needed, so CI runs them. They prove the mechanism on tmp_path — not SMB
   power-loss durability or concurrent-writer safety; the real drill stays owed
   in the L3 table and TODO.md.
+- **ocr_review stale-version binding is an offline gate:** `tests/test_ocr_review`
+  (37 tests) drives the real app over synthetic tmp_path bundles — byte-hash drift
+  or a wrong-target review is rejected with 409 `stale_ocr` on load/save/export,
+  the old review.json + exports stay byte-identical, `Workspace.open` validates
+  before rewriting meta/rasters, and the index tags the stale row. No real OCR or
+  browser, so CI runs them. They prove the server guards, **not the JS frontend**
+  (TestClient is not browser evidence); the visible-browser pass — inert freeze,
+  in-memory edits kept, no export POST after a failed save, reload persistence —
+  is recorded in `docs/ocr-review-ui-exploration.md` (verified 2026-11-12,
+  synthetic bundle).
 
 `push` triggers CI on `main`; there is no deploy stage because there is nothing
 hosted to deploy — the honest CD for this repo would be a GHCR publish of
