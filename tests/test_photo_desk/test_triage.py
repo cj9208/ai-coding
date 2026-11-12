@@ -195,3 +195,236 @@ def test_second_triage_after_apply_is_empty(env) -> None:
         assert again.moves == []
         # 隔离那张退出 in_place；剩下的两张仍成组、无垫底
         assert again.scored == 2
+
+
+def test_apply_commit_failure_keeps_recoverable_intent(env, monkeypatch):
+    settings, client = env
+    rows = build_burst(settings, client)
+    pid = rows["burst/IMG_0003.jpg"].id
+    with client.session() as session:
+        report = build_plan(settings, session)
+    mv = report.moves[0]
+    original = settings.photo_path(mv.rel_from).read_bytes()
+    with client.session() as session:
+        commit = session.commit
+
+        def fail_after_move():
+            if settings.photo_path(mv.rel_to).exists():
+                raise RuntimeError("injected commit failure")
+            return commit()
+
+        monkeypatch.setattr(session, "commit", fail_after_move)
+        with pytest.raises(RuntimeError, match="injected"):
+            apply_plan(settings, session, [mv])
+    assert settings.photo_path(mv.rel_to).read_bytes() == original
+    with client.session() as session:
+        entry = session.scalar(select(MoveLedger))
+        assert entry is not None
+        assert entry.phase == "quarantine_pending"
+        assert session.get(Photo, pid).rel_path == mv.rel_from
+
+    from photo_desk.triage import recover_moves
+
+    with client.session() as session:
+        outcomes = recover_moves(settings, session)
+        assert len(outcomes) == 1 and outcomes[0].resolved
+        assert restore(settings, session, photo_id=pid)[0].restored
+    assert settings.photo_path(mv.rel_from).read_bytes() == original
+
+
+def test_restore_commit_failure_keeps_recoverable_intent(env, monkeypatch):
+    settings, client = env
+    rows = build_burst(settings, client)
+    pid = rows["burst/IMG_0003.jpg"].id
+    original_path = settings.root / "burst/IMG_0003.jpg"
+    original = original_path.read_bytes()
+    with client.session() as session:
+        report = build_plan(settings, session)
+        apply_plan(settings, session, report.moves)
+    with client.session() as session:
+        commit = session.commit
+
+        def fail_after_move():
+            if original_path.exists():
+                raise RuntimeError("injected commit failure")
+            return commit()
+
+        monkeypatch.setattr(session, "commit", fail_after_move)
+        with pytest.raises(RuntimeError, match="injected"):
+            restore(settings, session, photo_id=pid)
+    assert original_path.read_bytes() == original
+    with client.session() as session:
+        entry = session.scalar(select(MoveLedger))
+        assert entry.phase == "restore_pending"
+        assert entry.restored_at is None
+        assert session.get(Photo, pid).state == STATE_QUARANTINED
+
+    from photo_desk.triage import recover_moves
+
+    with client.session() as session:
+        outcomes = recover_moves(settings, session)
+        assert len(outcomes) == 1 and outcomes[0].resolved
+        assert session.get(Photo, pid).state == STATE_IN_PLACE
+        assert restore(settings, session, photo_id=pid) == []
+
+
+def test_old_ledger_adds_phase_without_losing_history(tmp_path):
+    from sqlalchemy import text
+
+    client = SqliteClient(tmp_path / "old.db")
+    try:
+        with client.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE move_ledger (id INTEGER PRIMARY KEY, "
+                    "restored_at DATETIME)"
+                )
+            )
+            conn.execute(text("INSERT INTO move_ledger VALUES (1, NULL)"))
+            conn.execute(
+                text("INSERT INTO move_ledger VALUES (2, '2026-11-01 12:00:00')")
+            )
+        ensure_schema(client)
+        ensure_schema(client)
+        with client.engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT id, phase, restored_at FROM move_ledger ORDER BY id")
+            ).all()
+        assert rows[0] == (1, "quarantined", None)
+        assert rows[1] == (2, "quarantined", "2026-11-01 12:00:00")
+    finally:
+        client.dispose()
+
+
+def test_legacy_default_phase_respects_restored_at(env):
+    settings, client = env
+    rows = build_burst(settings, client)
+    pid = rows["burst/IMG_0003.jpg"].id
+    with client.session() as session:
+        apply_plan(settings, session, build_plan(settings, session).moves)
+        entry = session.scalar(select(MoveLedger))
+        entry.phase = "quarantined"
+        session.commit()
+        assert restore(settings, session, photo_id=pid)[0].restored
+        restored_at = entry.restored_at
+        assert restored_at is not None
+        entry.phase = "quarantined"
+        session.commit()
+        assert restore(settings, session, photo_id=pid) == []
+        assert entry.restored_at == restored_at
+        assert session.get(Photo, pid).state == STATE_IN_PLACE
+
+
+@pytest.mark.parametrize("restoring", [False, True])
+@pytest.mark.parametrize(
+    "location", ["source", "destination", "both", "neither", "bad"]
+)
+def test_recovery_matrix_is_conservative_and_idempotent(env, restoring, location):
+    from photo_desk.triage import recover_moves
+
+    settings, client = env
+    rows = build_burst(settings, client)
+    row0 = rows["burst/IMG_0003.jpg"]
+    original = settings.photo_path(row0.rel_path)
+    payload = original.read_bytes()
+    blurred = settings.blurred_dir / "pending_IMG_0003.jpg"
+    blurred.parent.mkdir(parents=True, exist_ok=True)
+    with client.session() as session:
+        row = session.get(Photo, row0.id)
+        entry = MoveLedger(
+            photo_id=row.id,
+            rel_from=row0.rel_path,
+            rel_to="blurred/pending_IMG_0003.jpg",
+            sha256=row.content_hash,
+            reason="blur_rank",
+            phase="restore_pending" if restoring else "quarantine_pending",
+        )
+        if restoring:
+            original.rename(blurred)
+            row.rel_path = entry.rel_to
+            row.state = STATE_QUARANTINED
+        session.add(entry)
+        session.commit()
+    src, dest = (blurred, original) if restoring else (original, blurred)
+    if location == "destination":
+        src.rename(dest)
+    elif location == "both":
+        dest.write_bytes(payload)
+    elif location == "neither":
+        src.unlink()
+    elif location == "bad":
+        src.write_bytes(b"changed bytes")
+    before = {str(p): p.read_bytes() if p.is_file() else None for p in (src, dest)}
+    with client.session() as session:
+        outcomes = recover_moves(settings, session)
+        assert len(outcomes) == 1
+        assert outcomes[0].resolved == (location in ("source", "destination"))
+    after = {str(p): p.read_bytes() if p.is_file() else None for p in (src, dest)}
+    assert after == before
+    with client.session() as session:
+        again = recover_moves(settings, session)
+        if location in ("source", "destination"):
+            assert again == []
+            row = session.get(Photo, row0.id)
+            in_place = (restoring and location == "destination") or (
+                not restoring and location == "source"
+            )
+            assert row.state == (STATE_IN_PLACE if in_place else STATE_QUARANTINED)
+        else:
+            assert len(again) == 1 and not again[0].resolved
+
+
+def test_pending_blocks_scan_and_triage_without_creating_rows(env):
+    settings, client = env
+    rows = build_burst(settings, client)
+    before = len(rows)
+    row0 = rows["burst/IMG_0003.jpg"]
+    with client.session() as session:
+        session.add(
+            MoveLedger(
+                photo_id=row0.id,
+                rel_from=row0.rel_path,
+                rel_to="blurred/pending.jpg",
+                sha256=row0.content_hash,
+                reason="blur_rank",
+                phase="restore_pending",
+            )
+        )
+        session.commit()
+    for operation in (scan, build_plan):
+        with client.session() as session:
+            with pytest.raises(RuntimeError, match="photos recover"):
+                operation(settings, session)
+            assert len(list(session.scalars(select(Photo)))) == before
+
+
+@pytest.mark.parametrize("after_rename", [False, True])
+def test_process_exit_retains_intent(env, monkeypatch, after_rename):
+    from pathlib import Path
+
+    from photo_desk.triage import recover_moves
+
+    settings, client = env
+    build_burst(settings, client)
+    with client.session() as session:
+        mv = build_plan(settings, session).moves[0]
+    original = settings.photo_path(mv.rel_from).read_bytes()
+    real_rename = Path.rename
+
+    def interrupted(path, target):
+        if after_rename:
+            real_rename(path, target)
+        raise SystemExit("simulated process exit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "rename", interrupted)
+        with client.session() as session:
+            with pytest.raises(SystemExit):
+                apply_plan(settings, session, [mv])
+    with client.session() as session:
+        assert session.scalar(select(MoveLedger)).phase == "quarantine_pending"
+        assert recover_moves(settings, session)[0].resolved
+        entry = session.scalar(select(MoveLedger))
+        assert entry.phase == ("quarantined" if after_rename else "cancelled")
+    expected = mv.rel_to if after_rename else mv.rel_from
+    assert settings.photo_path(expected).read_bytes() == original

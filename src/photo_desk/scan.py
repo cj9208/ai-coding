@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from .config import BLURRED_DIR_NAME, IMAGE_EXTS, Settings
 from .exif import read_exif
-from .library import STATE_IN_PLACE, STATE_MISSING, Photo
+from .library import STATE_IN_PLACE, STATE_MISSING, Photo, require_no_pending_moves
 
 #: SMB 上 stat 便宜、读文件贵——命中 (size, mtime_ns) 即跳过是全部性能设计的前提。
 _CHUNK = 1024 * 1024
@@ -60,6 +60,9 @@ def iter_photo_files(root: Path) -> Iterator[Path]:
 def scan(settings: Settings, session: Session) -> ScanStats:
     """一次全树增量清点。幂等：无变化时二次运行只产生 unchanged。"""
     settings.ensure_root()
+    # 未对账的移动意图必须先对清：否则隔离中断会被标 missing、
+    # 放回中断的原位会被当作新照片再次入库（photos recover）。
+    require_no_pending_moves(session)
     stats = ScanStats()
     indexed: dict[str, Photo] = {
         photo.rel_path: photo for photo in session.scalars(select(Photo))

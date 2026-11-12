@@ -107,7 +107,8 @@ def iter_photos(
 class MoveLedger(Base):
     """隔离账本（设计文档 §4.2）：一次移动一行，**永不删行**——放回是
     ``restored_at`` 置位，操作历史本身即审计面。``note`` 记非致命异常
-    （如放回时重建了已被删掉的父目录）。"""
+    （如放回时重建了已被删掉的父目录）。``phase`` 记操作阶段：意图先落盘
+    （*_pending），移动确认后转终态，中断由 ``photos recover`` 对账。"""
 
     __tablename__ = "move_ledger"
 
@@ -127,6 +128,12 @@ class MoveLedger(Base):
     )
     restore_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    #: quarantine_pending / restore_pending = 已落盘未对账的意图；
+    #: quarantined / restored / cancelled = 终态。旧行补列默认 quarantined，
+    #: ``restored_at != NULL`` 始终优先表示已放回。
+    phase: Mapped[str] = mapped_column(
+        String(24), default="quarantined", server_default="quarantined"
+    )
 
 
 #: photos 表 M1 新增列——已建库用 ensure_columns 轻量补（storage 姿势，不上迁移框架）。
@@ -137,3 +144,21 @@ def ensure_schema(storage) -> None:  # noqa: ANN001 - storage.SqliteClient
     """建表 + 增量补列。app/CLI 启动统一走这里，别各自 create_all。"""
     storage.init_schema(Base.metadata)
     storage.ensure_columns("photos", _M1_PHOTO_ADDITIONS)
+    storage.ensure_columns(
+        "move_ledger", {"phase": "VARCHAR(24) NOT NULL DEFAULT 'quarantined'"}
+    )
+
+
+def require_no_pending_moves(session: Session) -> None:
+    """存在未对账的移动意图时，拒绝任何会写库或动文件的操作。
+
+    scan 会把中断现场误标 missing / 把放回中断的原位当新照片再入库，
+    triage/restore 会叠加第二条意图——都必须先 ``photos recover`` 对清。
+    """
+    pending = session.scalar(
+        select(MoveLedger.id)
+        .where(MoveLedger.phase.in_(("quarantine_pending", "restore_pending")))
+        .limit(1)
+    )
+    if pending is not None:
+        raise RuntimeError(f"移动账本 {pending} 尚未对账；请先运行 photos recover")

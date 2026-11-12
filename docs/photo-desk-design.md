@@ -64,10 +64,10 @@
 | `exif.py` | 拍摄时间（含毫秒）/ GPS / 设备 / burst 标识提取 |
 | `quality.py` | 清晰度分：**纯函数**，输入图像数组、输出标量分，不碰文件系统 |
 | `groups.py` | 连拍归组（§4.3 三级兜底） |
-| `triage.py` | 组内排名 → 隔离建议 → 执行移动 + 写账本（§4.2） |
+| `triage.py` | 组内排名 → 隔离建议 → 两阶段移动 + 写账本；`recover_moves` 只做数据库对账（§4.2） |
 | `library.py` | SQLite：photo / tag / move_ledger 表 + `storage.FtsTable` 索引 |
 | `web/` | routers（pages/api）+ templates + static；`identity.py` 无（D-4） |
-| `cli.py` | `photos scan / triage / restore / serve` 入口 |
+| `cli.py` | `photos scan / triage / restore / recover / serve` 入口 |
 
 ## 4. 核心契约
 
@@ -81,19 +81,51 @@ D-2 的后期迁移动机决定这不是"路径写不写死"的问题，而是**
 - **数据库与账本一律存相对 `PHOTO_ROOT` 的 POSIX 风格路径**，任何查询/渲染需要绝对路径时经 `config.photo_path(rel)` 现拼。产出迁走、盘符变化、换机器，都只是改 env 后全表重定位，无数据改写。
 - `blurred/` 在 `PHOTO_ROOT` 之下（与原件同盘才能秒级 rename 移动；跨盘挂载时 config 校验并警告）。
 
-### 4.2 隔离账本：移动即记账，放回先验身
+### 4.2 隔离账本：意图先落盘，移动后确认，放回先验身
 
 `move_ledger` 表一行为一次移动：
 
 ```
-id | photo_id | rel_from | rel_to | sha256 | reason | group_id | moved_at | restored_at | restore_error
+id | photo_id | rel_from | rel_to | sha256 | reason | group_id | moved_at | restored_at | restore_error | note | phase
 ```
 
+每次移动（隔离与放回两个方向）都按**提交意图 → rename → 提交完成**三步执行。
+`phase` 列记录阶段：正常隔离 `quarantine_pending → quarantined`；正常放回
+`quarantined → restore_pending → restored`。中断（commit 失败、进程退出）留下
+已持久化的 pending 意图，由 `photos recover` 对账——rename 不再先于账本落盘。
+
+对账只核验账本已记录的两个路径并补记数据库，**绝不移动或覆盖文件**，不遍历
+磁盘猜原件：
+
+| pending 阶段 | 两端实际状态 | recover 动作 |
+|---|---|---|
+| quarantine_pending | 原位存在且哈希匹配，隔离位不存在 | phase=cancelled；不继续隔离，需重新 triage |
+| quarantine_pending | 原位不存在，隔离位存在且哈希匹配 | 补记 quarantined，Photo 指向隔离位 |
+| restore_pending | 隔离位存在且哈希匹配，原位不存在 | 撤销此次未发生的放回意图，回到 quarantined |
+| restore_pending | 隔离位不存在，原位存在且哈希匹配 | 补记 restored_at，Photo 回原位 |
+| 任一 | 两端均在/均不在、哈希不符、符号链接、Photo 身份不符 | 保留 pending，非零退出；两端字节不动 |
+
+- "取消意图"也不删账本行；`moved_at`/`restored_at` 在完成确认时更新，中断后的
+  对账时间是确认时间，不冒充精确 rename 时刻；
+- 存在未对清 pending 时，scan、triage（build_plan/apply）与 restore 一律拒绝
+  执行——scan 会把隔离中断标成 missing、把放回中断的原位当新照片再次入库；
+- 旧版账本经 `ensure_columns` 补列，默认 `quarantined`；`restored_at != NULL`
+  始终优先表示已放回，旧完成行不需批量回填；
 - `reason` 目前只有 `blur_rank`（组内排名垫底）与 `manual`（编辑模式人手），留枚举余地；
-- **放回 = 照账本走**：目标位置空闲 + 现文件 sha256 与账面一致 → 移回；sha256 不符（隔离后被人动过）→ 拒绝并标 `restore_error`，原件留在 `blurred/` 不猜；
+- **放回 = 照账本走**：目标位置空闲 + 现文件 sha256 与账面一致 + Photo 身份/状态
+  与账本一致 → 移回；sha256 不符（隔离后被人动过）→ 拒绝并标 `restore_error`，
+  原件留在 `blurred/` 不猜；
 - **整组放回**是 `restore --group <id>` 的一等操作（连拍"要么整体回来、要么只回最好那张"两种都是合理动作）；
 - 孤儿账本（放回时原路径的父目录已被设备同步侧删掉）：重建目录并放回，账本记 `recreated_parent`，不静默；
 - 账本永不删除行——放回是 `restored_at` 置位，操作历史本身就是审计面。
+
+恢复入口：`photos recover --root <测试副本> --data-dir <该副本的库目录>`——必须
+与中断操作使用同一组 root/data-dir，不得新建空库假装对账；全部对清或无待对账
+exit 0，存在歧义 exit 1 且不继续隔离。本机制前提是单个维护写者，解决应用异常、
+进程退出后的恢复，不声称并发写者安全或 NAS 硬断电持久性；`exists()+rename()`
+不是跨进程原子的"不覆盖"。旧版本留下的**完全没有账本**的孤立 blurred 文件不
+自动修复：仅凭文件名/哈希不能证明原路径，先保存现场和数据库备份、人工核定，
+新机制不伪造历史意图。
 
 photo 表的 `state` 派生自账本最新一行：`in_place / quarantined / orphaned`。查看模式下 `blurred/` 里的照片在时间线**降权可见**（灰色 + 一键放回按钮），不是消失——废片判断允许出错，出错允许纠正。
 
@@ -129,6 +161,13 @@ photo 表的 `state` 派生自账本最新一行：`in_place / quarantined / orp
 | **M1 筛选**（诉求①）✅ | quality / groups / triage + restore CLI | 构造 golden 连拍组（含人为模糊样张）：组识别全对、垫底样张被隔离且账本可放回；`restore --group` 与 sha256 不符拒绝路径均有测试；真实目录演练一次，隔离清单先出、人工确认后执行（首次执行保留 `--dry-run` 默认开）。**验收记录（2026-09-23）**：`tests/golden/photo_groups.jsonl` 7 例锁死归组规则；`test_triage.py` 覆盖 dry-run 不落盘、账本落行、单张/整组放回、篡改拒放、占位拒覆盖、孤儿重建父目录、无分数不错杀；演示树真实演练 scan→triage(3 张垫底全中)→--apply→restore --group+--photo 全回原位、sha256 验身通过。**落地偏离两处**：① 时间线只灰显 quarantined，放回按钮归 M2 编辑模式（CLI `photos restore` 已给全）；② golden 连拍用"同秒不同 SubSecTime"表达 <1s 间隔——EXIF DateTimeOriginal 秒级粒度，同秒多张必须靠毫秒字段 |
 | **M2 回看**（诉求②） | tag 体系 / FTS 检索 / 查看·编辑双模式 UI / 缩略图缓存 | 浏览器实测：中文 tag 搜索命中、编辑模式打 tag、重启后持久；缩略图缓存重生成幂等 |
 | **M3 机读 tag** | CLIP/人脸，独立立项 | gated：仅当 M2 用起来后确认"找不到照片"是真实痛点才启动 |
+
+中断恢复的验收口径分列两档：**离线中断恢复**以真实调用链上的故障注入证明——
+隔离/放回两方向的 rename 后 commit 失败与进程退出均留下 pending 意图，
+`recover_moves` 对账状态矩阵（含歧义不动作、幂等）、pending 阻断 scan/triage、
+旧账本补列与 `restored_at` 优先均有回归（`tests/test_photo_desk/`）；
+**真实 NAS/HEIC 中断演练**是独立验收门，只在受控副本与独立数据库上演练，
+tmp_path 合成夹具不能替代，欠项保留在根 `TODO.md`。
 
 ## 6. 已知风险（正面记录，不掩盖）
 
