@@ -35,18 +35,24 @@ from .workspace import (
 
 def add(pdf: str | Path, ocr_json: str | Path, work_root: Path) -> Path:
     """Build the workspace for an explicit (source, contract-JSON) pair."""
+    from storage import sha256_hex
+
     json_path = Path(ocr_json)
-    doc = OcrDocument.model_validate_json(json_path.read_text(encoding="utf-8"))
+    raw = json_path.read_bytes()
+    doc = OcrDocument.model_validate_json(raw)
     source = Path(pdf)
     if not source.is_file():
         raise FileNotFoundError(f"源文件不存在: {source}")
     if doc.source.kind != "pdf":
         raise ValueError("v1 校对仅支持 PDF 源（图片源列为 follow-up）")
-    from storage import sha256_hex
-
     if sha256_hex(source.read_bytes()) != doc.source.sha256:
         print(f"警告: {source} 与契约记录的 sha256 不一致，仍按现状建工作区")
-    item = InboxDoc(ocr_json=json_path, doc=doc, source=source)
+    item = InboxDoc(
+        ocr_json=json_path,
+        doc=doc,
+        source=source,
+        ocr_json_sha256=sha256_hex(raw),
+    )
     ws = Workspace.open(work_root, item)
     print(f"workspace ready: {ws.root}")
     return ws.root

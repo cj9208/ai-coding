@@ -17,7 +17,8 @@
         </td>
         <td>{{ r.pages }}</td>
         <td>
-          {% if r.done == r.pages %}<span class="tag ok">已完成</span>
+          {% if r.stale %}<span class="tag warn">版本变化，需重新核对</span>
+          {% elif r.done == r.pages %}<span class="tag ok">已完成</span>
           {% elif r.done %}<span class="tag part">{{ r.done }}/{{ r.pages }}</span>
           {% else %}<span class="tag">未开始</span>{% endif %}
         </td>

@@ -14,15 +14,22 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from ocr_backend.contract import OcrDocument
+from storage import sha256_hex
 
 from . import review as rv
-from .workspace import InboxDoc, Workspace, scan_inbox
+from .workspace import (
+    InboxDoc,
+    StaleReviewError,
+    Workspace,
+    scan_inbox,
+    validate_target,
+)
 
 PACKAGE_DIR = Path(__file__).parent
 USER_COOKIE = "ocr_review_user"
@@ -50,11 +57,13 @@ def find_item(inbox: Path, work_root: Path, ws_id: str) -> InboxDoc | None:
         ocr_json = Path(meta["ocr_json"])
         source = Path(meta["source"]) if meta.get("source") else None
         if ocr_json.is_file():
-            doc = OcrDocument.model_validate_json(ocr_json.read_text(encoding="utf-8"))
+            raw = ocr_json.read_bytes()
+            doc = OcrDocument.model_validate_json(raw)
             return InboxDoc(
                 ocr_json=ocr_json,
                 doc=doc,
                 source=source if source and source.is_file() else None,
+                ocr_json_sha256=sha256_hex(raw),
             )
     return None
 
@@ -65,6 +74,14 @@ def create_app(inbox: Path, work_root: Path) -> FastAPI:
     app.mount(
         "/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="static"
     )
+
+    @app.exception_handler(StaleReviewError)
+    async def stale_review_handler(
+        request: Request, exc: StaleReviewError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409, content={"detail": str(exc), "code": "stale_ocr"}
+        )
 
     def item_or_404(ws_id: str) -> InboxDoc:
         if not _WS_ID_RE.match(ws_id):
@@ -81,12 +98,13 @@ def create_app(inbox: Path, work_root: Path) -> FastAPI:
         rows = []
         for it in scan_inbox(inbox):
             ws = Workspace(work_root / it.ws_id, it.ws_id)
-            done, total = (
-                ws.progress(it.doc)
-                if ws.meta_path.is_file()
-                else (0, len(it.doc.pages))
-            )
-            review = ws.load_review() if ws.meta_path.is_file() else None
+            stale = False
+            try:
+                review = ws.load_review(it)
+            except StaleReviewError:
+                review = None
+                stale = True
+            done = sum(p.status == "done" for p in review.pages) if review else 0
             rows.append(
                 {
                     "ws_id": it.ws_id,
@@ -96,6 +114,7 @@ def create_app(inbox: Path, work_root: Path) -> FastAPI:
                     "model": it.doc.backend.model,
                     "source_ok": it.source is not None,
                     "updated_at": review.updated_at if review else "",
+                    "stale": stale,
                 }
             )
         return templates.TemplateResponse(
@@ -115,11 +134,12 @@ def create_app(inbox: Path, work_root: Path) -> FastAPI:
     async def get_document(ws_id: str) -> dict:
         item = item_or_404(ws_id)
         ws = Workspace.open(work_root, item)
-        review = ws.load_review() or ws.new_review(item)
+        existing = ws.load_review(item)
+        review = existing or ws.new_review(item)
         return {
             "document": json.loads(item.doc.model_dump_json()),
             "review": json.loads(review.model_dump_json()),
-            "review_is_new": ws.load_review() is None,
+            "review_is_new": existing is None,
             "source_ok": item.source is not None,
             "stem": item.stem,
         }
@@ -128,10 +148,11 @@ def create_app(inbox: Path, work_root: Path) -> FastAPI:
     async def put_review(ws_id: str, payload: ReviewPut, request: Request) -> dict:
         item = item_or_404(ws_id)
         ws = Workspace.open(work_root, item)
-        existing = ws.load_review()
+        existing = ws.load_review(item)
+        review = payload.review
+        validate_target(item, review)
         if existing is not None and payload.base_updated_at != existing.updated_at:
             raise HTTPException(409, "他人已保存，请刷新后重试")
-        review = payload.review
         review.updated_at = rv.now_iso()
         name = _decode_user(request)
         if name:
@@ -141,17 +162,17 @@ def create_app(inbox: Path, work_root: Path) -> FastAPI:
                 for entry in page.entries.values():
                     if not entry.updated_by:
                         entry.updated_by, entry.updated_at = name, review.updated_at
-        ws.save_review(review)
+        ws.save_review(item, review)
         return {"updated_at": review.updated_at}
 
     @app.post("/api/w/{ws_id}/export")
     async def export(ws_id: str) -> dict:
         item = item_or_404(ws_id)
         ws = Workspace.open(work_root, item)
-        review = ws.load_review()
+        review = ws.load_review(item)
         if review is None:
             raise HTTPException(400, "尚无人工修改可导出")
-        paths = ws.export(item.doc, review)
+        paths = ws.export(item, review)
         return {"paths": [str(p) for p in paths]}
 
     @app.get("/w/{ws_id}/pages/{fname}")

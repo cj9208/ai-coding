@@ -2,7 +2,7 @@
 
 > 一句话核心：OCR 跑完先产出契约 JSON，人工校对做成一个**独立的薄 Web UI**（FastAPI + Jinja + 原生 JS + SVG overlay，零构建链），它读 PDF 和 `OcrDocument`、把页栅格到契约声明的像素网格上、用百分比定位做框叠加；人的修改**不写回契约**，而是落在一份稀疏的 review sidecar 里，最终产物由 `apply_review(doc, review)` 生成一份标准 `OcrDocument`。核心权衡是"复用通用标注工具"vs"自建薄 UI"——因为我们的数据模型是**块级 + 带 kind / content_format 的富文本**，而通用标注工具的世界模型是"图片 + 多边形 + 单条文本"，映射成本高于自建。
 
-日期：2026-09-21。状态：**已实现并真机验证（M1 + M2 + M3 的纯函数部分）**——`src/ocr_review/`（review/patch/workspace/render_pages/app/cli + 零构建前端），`ocr-backend parse` 已同步随拷源文件进 out/。浏览器端用 `verify_doc.pdf` 真机 OCR 产物走通：栅格与契约逐像素对齐、内容修正 / kind 改判 / 删块 / 拖框补录 / 署名 / 导出（`apply_review` 产物通过 `OcrDocument` 校验、机器 JSON 原样未动）；`tests/test_ocr_review/` 20 条。真机验证还抓到并修复了一个 Chrome 兼容 bug（`SVGPoint.matrixTransform` 拒绝 DOMMatrix，改用线性换算，见 review.js 注释）。唯一欠账：可见窗口下的真实鼠标拖框未人工复验（自动化环境视口隐藏，用同源派发验证了逻辑）。前置阅读：[ocr-backend-design.md](ocr-backend-design.md)（契约与适配器，已实现）、[service-containerization-exploration.md](service-containerization-exploration.md)（runner 与文件协议，本文沿用）。读法：§2 是要先分清的两类用途；§3 是三条决定成败的技术点；§4 是买/用现成 vs 自建的对照；§5 是推荐形态与数据模型；§6 是范围切分与里程碑。
+日期：2026-09-21。状态：**已实现并真机验证（M1 + M2 + M3 的纯函数部分）**——`src/ocr_review/`（review/patch/workspace/render_pages/app/cli + 零构建前端），`ocr-backend parse` 已同步随拷源文件进 out/。浏览器端用 `verify_doc.pdf` 真机 OCR 产物走通：栅格与契约逐像素对齐、内容修正 / kind 改判 / 删块 / 拖框补录 / 署名 / 导出（`apply_review` 产物通过 `OcrDocument` 校验、机器 JSON 原样未动）；`tests/test_ocr_review/` 31 条。真机验证还抓到并修复了一个 Chrome 兼容 bug（`SVGPoint.matrixTransform` 拒绝 DOMMatrix，改用线性换算，见 review.js 注释）。欠账：可见窗口下的真实鼠标拖框未人工复验（自动化环境视口隐藏，用同源派发验证了逻辑）；版本失配保护（§3.2 第 3 条）的可见浏览器验证尚欠——合成 bundle 的过期提示、控件/快捷键阻断、保存失败后无导出请求，TestClient 回归不替代前端操作证据。前置阅读：[ocr-backend-design.md](ocr-backend-design.md)（契约与适配器，已实现）、[service-containerization-exploration.md](service-containerization-exploration.md)（runner 与文件协议，本文沿用）。读法：§2 是要先分清的两类用途；§3 是三条决定成败的技术点；§4 是买/用现成 vs 自建的对照；§5 是推荐形态与数据模型；§6 是范围切分与里程碑。
 
 ## 1. 目标场景
 
@@ -63,9 +63,9 @@ ReviewEntry
 
 三条规则：
 
-1. **稀疏**：没动过的块一条记录都不写 → 机器输出重跑一次，补丁还能贴回去。
+1. **稀疏**：没动过的块一条记录都不写。稀疏让补丁便宜、可 diff，但**不**意味着重跑后能自动贴回：重跑产生的是新版本，贴回必须走显式迁移（见第 3 条）。
 2. **`apply_review(doc, review) -> OcrDocument`** 是纯函数（放 `ocr_backend` 还是 `ocr_review` 见 §5.4）：产出仍是合法契约，消费方**完全不知道**有没有人工介入过——契约作为唯一交换形状的地位不被削弱。
-3. **贴回去要匹配**：换模型重跑后 block_id 可能变，匹配按「页序 + bbox IoU + 内容相似度」做，匹配不上的块标记 `needs_recheck` 而不是静默丢弃。这条是 B 用途的全部价值所在，值得在 v1 就实现一个朴素版本（IoU 阈值 0.5 即可）。
+3. **同源文件不等于同一次 OCR，失配默认拒绝**：同一 PDF 重跑会复用 block_id，旧修订若自动加载，就等于把上一次的人工判断冒充到新内容上。因此每份 review 与它校对的那份 OCR JSON 的**字节哈希**（`ocr_json_sha256`，取自解析 doc 的同一份字节，三个构造入口一致）及 source sha / model / pipeline_version 绑定；Workspace 在 load/new/save/progress/export 统一走 `validate_target`，失配抛 `StaleReviewError` → HTTP 409 `code=stale_ocr`，旧 review 与既有导出字节不动，列表页按行显示「版本变化，需重新核对」而不是整页失败，前端冻结编辑但保留未保存的内存修订。路径不是身份：同字节 bundle 搬家不必拒绝。`reanchor`（页序 + bbox IoU + 内容相似度，未匹配块标 `needs_recheck`）目前只是 `patch.py` 里的纯函数，**未接入 UI**；只有显式核对后的迁移才能产生新的 target，不做自动 reanchor。
 
 ### 3.3 契约要不要加 review 字段？→ 不加
 
@@ -148,7 +148,8 @@ data/ocr_review/<pdf-sha256[:12]>/
 ```
 src/ocr_review/
   app.py        # create_app(workspace) → FastAPI
-  workspace.py  # 目录约定、review.json 读写（原子）、sha256 校验
+  workspace.py  # 目录约定、review.json 读写（原子）、validate_target 版本守卫
+                #（load/new/save/progress/export 全查，失配 StaleReviewError）
   render_pages.py  # PyMuPDF 按契约页尺寸栅格化 + 缓存失效
   patch.py      # apply_review(doc, review) -> OcrDocument；reanchor(旧doc,新doc) 匹配
   templates/ static/
@@ -162,6 +163,7 @@ tests/test_ocr_review/   # patch/reanchor 纯函数测试为主，UI 只测路�
 协作模型是"一人一份、串行审阅"，所以只需要两件事：
 
 - **原子写 + 乐观冲突检**：`review.json` tmp + `os.replace` 落盘；每次保存带上读到的 `updated_at`，服务端发现盘上更新则返回 409，UI 提示"他人已保存，请刷新"。不做行级锁、不做实时协同。
+- **版本绑定检（先于乐观检）**：加载/保存/导出先核对 review.target 与当前 OCR JSON 字节哈希（§3.2 第 3 条）；失配返回 409 `code=stale_ocr`，UI 显示「版本变化」并冻结编辑（inert + 禁用控件 + 快捷键守卫），未保存的内存修订不清空；导出严格链在保存成功之后，保存失败绝不发导出请求。两种 409 不混用：版本失配不是"他人已保存"。
 - **手工身份**：`ReviewEntry.updated_by` 记录修改人。参照 `file_manager/identity.py` 的既有做法（无鉴权、首次进入选/输入名字存 cookie），不引入登录体系。
 
 v1 不建 DB——单文件 JSON 足够，且 diff 可读、能直接进 fixtures。若将来工作区数量大到列表页需要检索/统计，再把 `review.json` 灌进 `src/storage/sqlite.py` 做索引（文件仍是交换格式与唯一真相）。
