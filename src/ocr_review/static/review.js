@@ -224,27 +224,51 @@
     renderEditor();
   }
 
+  /* 版本失配 / 加载失败后冻结编辑：inert 阻断鼠标与键盘，控件显式禁用。
+   * 内存中的 doc/review 与 dirty 标志原样保留——未保存的修订不静默清空，
+   * 刷新页面（重新加载）后才解除。 */
+  function blockEditing() {
+    S.draw = false;
+    drag = null;
+    removeTemp();
+    root.inert = true;
+    root.querySelectorAll("button,input,select,textarea").forEach(function (el) {
+      el.disabled = true;
+    });
+  }
+
+  function responseJson(r) {
+    return r.json().then(function (d) {
+      if (!r.ok) {
+        var error = new Error(d.detail || ("HTTP " + r.status));
+        error.code = d.code;
+        throw error;
+      }
+      return d;
+    });
+  }
+
   function save() {
-    fetch("/api/w/" + WS + "/review", {
+    if (root.inert || !S.doc || !S.review) return Promise.resolve(false);
+    return fetch("/api/w/" + WS + "/review", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ review: S.review, base_updated_at: S.base }),
-    }).then(function (r) {
-      if (r.status === 409) { status("他人已保存，点击“保存”旁重新加载", "conflict"); return; }
-      if (!r.ok) return r.json().then(function (d) { throw new Error(JSON.stringify(d)); });
-      return r.json();
-    }).then(function (d) {
-      if (!d) return;
+    }).then(responseJson).then(function (d) {
       S.dirty = false;
+      S.base = d.updated_at;
+      S.review.updated_at = d.updated_at;
       status("已保存 " + d.updated_at.slice(11), "ok");
       return load(false);
-    }).catch(function (e) { status("保存失败: " + e.message, "conflict"); });
+    }).catch(function (e) {
+      if (e.code === "stale_ocr") blockEditing();
+      status("保存失败: " + e.message, "conflict");
+      return false;
+    });
   }
 
   function load(preserveSelection) {
-    fetch("/api/w/" + WS + "/document").then(function (r) {
-      return r.json();
-    }).then(function (d) {
+    return fetch("/api/w/" + WS + "/document").then(responseJson).then(function (d) {
       S.doc = d.document;
       S.review = d.review;
       S.base = d.review.updated_at;
@@ -263,6 +287,11 @@
       }).join("");
       renderPage();
       if (!d.source_ok) status("缺少源 PDF：无法显示页图底图", "conflict");
+      return true;
+    }).catch(function (e) {
+      blockEditing();
+      status("加载失败: " + e.message, "conflict");
+      return false;
     });
   }
 
@@ -363,15 +392,13 @@
     $("btn-add").addEventListener("click", function () { setDraw(!S.draw); });
     $("btn-save").addEventListener("click", save);
     $("btn-export").addEventListener("click", function () {
-      save();
-      setTimeout(function () {
-        fetch("/api/w/" + WS + "/export", { method: "POST" })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            if (d.paths) status("已导出: " + d.paths[0], "ok");
-            else status(d.detail || "导出失败", "conflict");
+      save().then(function (saved) {
+        if (!saved) return;
+        return fetch("/api/w/" + WS + "/export", { method: "POST" })
+          .then(responseJson).then(function (d) {
+            status("已导出: " + d.paths[0], "ok");
           });
-      }, 300);
+      }).catch(function (e) { status("导出失败: " + e.message, "conflict"); });
     });
     $("blocklist").addEventListener("click", function (evt) {
       var li = evt.target.closest("li");
@@ -414,6 +441,7 @@
       }
     });
     document.addEventListener("keydown", function (evt) {
+      if (root.inert || !S.doc) return;
       var t = evt.target.tagName;
       if (t === "INPUT" || t === "TEXTAREA" || t === "SELECT") return;
       var list = pageBlocks(S.page);
@@ -428,7 +456,7 @@
       if (S.dirty) { evt.preventDefault(); evt.returnValue = ""; }
     });
     img.onerror = function () {
-      status("页图缺失（源 PDF 不在收件箱旁？）", "conflict");
+      if (!root.inert) status("页图缺失（源 PDF 不在收件箱旁？）", "conflict");
     };
   }
 

@@ -32,11 +32,16 @@ WORK_ROOT_DEFAULT = data_dir("ocr_review")
 
 @dataclass
 class InboxDoc:
-    """One parsed document found in the inbox, plus its resolved source file."""
+    """One parsed document found in the inbox, plus its resolved source file.
+
+    ``ocr_json_sha256`` is the digest of the *same bytes* ``doc`` was parsed
+    from — never a second read of the file, which could pick up a newer OCR
+    run between the two reads."""
 
     ocr_json: Path
     doc: OcrDocument
     source: Path | None
+    ocr_json_sha256: str
     stem: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -66,18 +71,57 @@ def scan_inbox(inbox: Path) -> list[InboxDoc]:
         return items
     for json_path in inbox.glob("*.ocr.json"):
         try:
-            doc = OcrDocument.model_validate_json(json_path.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
-            continue  # a half-written bundle is not a pending review
-        items.append(
-            InboxDoc(
+            raw = json_path.read_bytes()
+            doc = OcrDocument.model_validate_json(raw)
+            item = InboxDoc(
                 ocr_json=json_path,
                 doc=doc,
                 source=_resolve_source(json_path, doc),
+                ocr_json_sha256=sha256_hex(raw),
             )
-        )
+            items.append(item)
+        except (ValueError, OSError):
+            continue  # a half-written bundle is not a pending review
     items.sort(key=lambda i: i.ocr_json.stat().st_mtime, reverse=True)
     return items
+
+
+class StaleReviewError(ValueError):
+    """The review on disk (or in memory) targets a different OCR run."""
+
+
+def validate_target(item: InboxDoc, review: rv.ReviewDocument | None) -> None:
+    """Refuse any read/write/export that would mix OCR runs.
+
+    Guards both directions: an ``item`` loaded before the file changed, and a
+    review written against an older run. The JSON *path* is not identity —
+    the same bytes moved to a new path stay valid.
+    """
+    try:
+        current = item.ocr_json.read_bytes()
+    except OSError as exc:
+        raise StaleReviewError("OCR 版本无法核对：文件不可读；未修改人工修订") from exc
+    if sha256_hex(current) != item.ocr_json_sha256:
+        raise StaleReviewError("OCR 版本已变化，请重新加载；未修改人工修订")
+    if OcrDocument.model_validate_json(current) != item.doc:
+        raise StaleReviewError("OCR 版本与内存文档不一致；拒绝应用修订")
+    if review is None:
+        return
+    target = review.target
+    if (
+        target.ocr_json_sha256 != item.ocr_json_sha256
+        or target.source_sha256 != item.doc.source.sha256
+        or target.model != item.doc.backend.model
+        or target.pipeline_version != item.doc.backend.pipeline_version
+    ):
+        raise StaleReviewError(
+            "OCR 版本已变化，旧人工修订已保留；请显式核对或迁移后再编辑、导出"
+        )
+
+
+def done_count(review: rv.ReviewDocument | None) -> int:
+    """Pages marked done in a review; 0 when no review exists yet."""
+    return sum(p.status == "done" for p in review.pages) if review else 0
 
 
 class Workspace:
@@ -100,6 +144,7 @@ class Workspace:
         return ws
 
     def _ensure(self, item: InboxDoc) -> None:
+        self.load_review(item)
         self.root.mkdir(parents=True, exist_ok=True)
         self.meta_path.write_text(
             json.dumps(
@@ -122,18 +167,22 @@ class Workspace:
 
     # ---------------------------------------------------------------- review
 
-    def load_review(self) -> rv.ReviewDocument | None:
+    def load_review(self, item: InboxDoc) -> rv.ReviewDocument | None:
+        validate_target(item, None)
         if not self.review_path.is_file():
             return None
-        return rv.ReviewDocument.model_validate_json(
+        review = rv.ReviewDocument.model_validate_json(
             self.review_path.read_text(encoding="utf-8")
         )
+        validate_target(item, review)
+        return review
 
     def new_review(self, item: InboxDoc) -> rv.ReviewDocument:
+        validate_target(item, None)
         return rv.ReviewDocument(
             target=rv.ReviewTarget(
                 ocr_json_path=str(item.ocr_json),
-                ocr_json_sha256=sha256_hex(item.ocr_json.read_bytes()),
+                ocr_json_sha256=item.ocr_json_sha256,
                 source_sha256=item.doc.source.sha256,
                 model=item.doc.backend.model,
                 pipeline_version=item.doc.backend.pipeline_version,
@@ -142,34 +191,40 @@ class Workspace:
             updated_at=rv.now_iso(),
         )
 
-    def save_review(self, review: rv.ReviewDocument) -> None:
+    def save_review(self, item: InboxDoc, review: rv.ReviewDocument) -> None:
         """Atomic write: temp file in-dir + os.replace, so a crash mid-save
-        can never truncate the only editable truth."""
+        can never truncate the only editable truth. The post-write recheck
+        narrows the race window (no file locks); a re-OCR that still slips in
+        leaves the review bound to the old hash, flagged stale on next load."""
+        self.load_review(item)
+        validate_target(item, review)
         tmp = self.review_path.with_suffix(".json.tmp")
-        tmp.write_text(review.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(tmp, self.review_path)
+        try:
+            tmp.write_text(review.model_dump_json(indent=2), encoding="utf-8")
+            validate_target(item, review)
+            os.replace(tmp, self.review_path)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     # -------------------------------------------------------------- progress
 
-    def progress(self, doc: OcrDocument) -> tuple[int, int]:
+    def progress(self, item: InboxDoc) -> tuple[int, int]:
         """(pages done, total pages)."""
-        review = self.load_review()
-        if review is None:
-            return 0, len(doc.pages)
-        done = sum(1 for p in review.pages if p.status == "done")
-        return done, len(doc.pages)
+        return done_count(self.load_review(item)), len(item.doc.pages)
 
     # ---------------------------------------------------------------- export
 
-    def export(self, doc: OcrDocument, review: rv.ReviewDocument) -> list[Path]:
+    def export(self, item: InboxDoc, review: rv.ReviewDocument) -> list[Path]:
         """Materialize the reviewed document as a plain contract JSON + md."""
         from .patch import apply_review
 
-        out = apply_review(doc, review)
+        validate_target(item, review)
+        self.load_review(item)
+        out = apply_review(item.doc, review)
+        validate_target(item, review)
         self.export_dir.mkdir(parents=True, exist_ok=True)
-        stem = Path(self.meta["ocr_json"]).stem.removesuffix(".ocr")
-        json_path = self.export_dir / f"{stem}.reviewed.json"
+        json_path = self.export_dir / f"{item.stem}.reviewed.json"
         json_path.write_text(out.model_dump_json(indent=2), encoding="utf-8")
-        md_path = self.export_dir / f"{stem}.reviewed.md"
+        md_path = self.export_dir / f"{item.stem}.reviewed.md"
         md_path.write_text(document_markdown(out), encoding="utf-8")
         return [json_path, md_path]
