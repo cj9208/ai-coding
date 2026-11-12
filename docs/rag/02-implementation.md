@@ -194,14 +194,22 @@ pack is insufficient — abstention never pays for a token. Otherwise one
 parents; chunk text truncates at 1500 chars (parents at 2×). The generator
 picks one of the five outcomes; `validate_answer` is then deterministic:
 
-- unknown/invalid outcome string → `insufficient`;
-- claim refs outside `1..n` are stripped, claims left with no refs are
-  counted and dropped from the checked list;
-- `answered` downgrades to `partial` if any evidence chunk is missing, any
-  claim lost refs, or any claim was uncited.
+- 未知 outcome 经生成边界归为 insufficient；不新增 refuse 枚举。
+- validate_answer 保留全部非空原始声明及清洗后的 refs；范围外 refs 被删除，
+  无有效 refs 的声明仍保留，空白声明不计入分母。仅有引用标记、没有可展示
+  正文的声明保留但 refs 置空。Answer.claims 用于审计和覆盖率，不可直接展示。
+- answered/partial 的 text 从可引用声明确定性重建，不复用模型的独立 answer
+  正文。内联数字引用与 context 标记被移除，再按有效 refs 添加规范锚点；
+  多行声明折为单段，不截掉后续行。
+- 有声明丢失 refs 或无有效引用时，answered 降为 partial；partial 总带固定
+  的证据缺口说明。无任何可展示有据声明时转为 insufficient 并明确拒答，
+  包括 answered/partial 的空 claims。clarify 保留问题及旧 text 回退语义；
+  insufficient/escalated 不变更状态，但不展示任意生成正文。
+- 这些检查保证引用锚点完整性与展示来源可追踪，不验证片段对声明的语义蕴含。
 
-CLI exit codes: 0 for `answered`/`partial` (and always for
-`--retrieve-only`), **2** for `clarify`/`insufficient`/`escalated`.
+CLI 对 answered/partial 仍退出 0，对 clarify/insufficient/escalated 退出 2；
+--retrieve-only 仍退出 0。空 claims 的事实回答现归 insufficient，因而退出 2。
+CLI 只展示安全正文，不再逐条打印 audit claims。
 
 ## Storage: what the schema ended up being
 

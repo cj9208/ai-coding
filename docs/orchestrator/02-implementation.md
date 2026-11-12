@@ -157,7 +157,7 @@ else; neither may decide retry, switch, or acceptance.
 | success | answered (citations included) / partial (citations *withheld* → v6 reachable) | hits found; `answer_markdown` + `records` + `result_count` |
 | weak | clarify → `user_constraint_missing` (reaches e5); insufficient/escalated → `insufficient_evidence` | zero hits → `insufficient_evidence`; empty query → `user_constraint_missing` |
 | failed | any exception → `dependency_unavailable` | db unreadable → `dependency_unavailable` (FTS syntax errors can no longer reach here — fixed in `storage.fts`, see M3 notes) |
-| grounding | `grounding_coverage` = cited claims / claims, v3 gate | none — records are data, entry has no validation rule |
+| grounding | `grounding_coverage` = 校验后有有效 refs 的非空原始声明数 / 全部非空原始声明数；空集合为 0，保留三位小数；v3 门槛不变，比例不是语义正确率 | none — records are data, entry has no validation rule |
 | DP-10 | `conservative` widens `retrieve(k=ceil(k×1.5))` | no-op by design (recall/precision tradeoff doesn't exist for an exact list) |
 
 `file_manager` imports are lazy inside `run` (the web stack must not load

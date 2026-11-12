@@ -137,6 +137,15 @@ merged under the rule.
   in-memory edits kept, no export POST after a failed save, reload persistence —
   is recorded in `docs/ocr-review-ui-exploration.md` (verified 2026-11-12,
   synthetic bundle).
+- **RAG grounding boundaries are an offline gate:** `tests/test_rag/test_answer.py`,
+  `tests/test_rag/test_evaluation_cli.py` and
+  `tests/test_orchestrator/test_capabilities_rag.py` feed raw JSON through a fake
+  `chat_json`, then run the real `generate` → `validate_answer` → adapter →
+  runtime chain (retrieval and the front-half explanation are isolated). They pin
+  the claim denominator, illegal-ref cleaning, no-evidence refusal, clarify, the
+  v3/v6 decision rows, the CLI's second-leak guard and the trace counts — no API
+  credentials or real corpus needed, so CI runs them. The gate proves citation
+  integrity, **not semantic entailment accuracy**.
 
 `push` triggers CI on `main`; there is no deploy stage because there is nothing
 hosted to deploy — the honest CD for this repo would be a GHCR publish of

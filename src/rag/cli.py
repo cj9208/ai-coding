@@ -260,9 +260,6 @@ def query(
                 click.echo(f"outcome: {answer.outcome.value}")
                 if answer.text:
                     click.echo(answer.text)
-                for claim in answer.claims:
-                    refs = ", ".join(f"[{r}]" for r in claim.refs) or "(no citation)"
-                    click.echo(f"  • {claim.text}  ← {refs}")
                 if answer.clarification:
                     click.echo(f"clarification: {answer.clarification}")
                 if answer.notes:
