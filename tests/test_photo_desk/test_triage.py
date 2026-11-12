@@ -18,7 +18,7 @@ from photo_desk.library import (
     ensure_schema,
 )
 from photo_desk.scan import scan
-from photo_desk.triage import apply_plan, build_plan, restore
+from photo_desk.triage import Move, apply_plan, build_plan, restore
 from storage import SqliteClient
 
 from .helpers import make_burst_photo, make_photo, make_settings
@@ -169,6 +169,42 @@ def test_restore_refuses_to_overwrite_occupied_slot(env) -> None:
         outcomes = restore(settings, session, photo_id=pid)
     assert not outcomes[0].restored and "占用" in outcomes[0].detail
     assert (settings.root / "burst" / "IMG_0003.jpg").read_bytes() == b"occupant"
+
+
+@pytest.mark.parametrize("tamper", ["rel_path", "content_hash", "state", "deleted"])
+def test_restore_rejects_photo_identity_tampering(env, tamper) -> None:
+    """正常隔离后 Photo 行被人改过/删掉：业务拒绝返回 outcome，不抛异常，
+    blurred 字节不动、账本保持 quarantined 并记 restore_error。"""
+    settings, client = env
+    rows = build_burst(settings, client)
+    pid = rows["burst/IMG_0003.jpg"].id
+    with client.session() as session:
+        report = build_plan(settings, session)
+        apply_plan(settings, session, report.moves)
+        blurred_rel = session.get(Photo, pid).rel_path
+    blurred_bytes = settings.photo_path(blurred_rel).read_bytes()
+    with client.session() as session:
+        row = session.get(Photo, pid)
+        if tamper == "rel_path":
+            row.rel_path = "elsewhere/IMG_0003.jpg"
+        elif tamper == "content_hash":
+            row.content_hash = "0" * 64
+        elif tamper == "state":
+            row.state = STATE_IN_PLACE
+        else:
+            session.delete(row)
+        session.commit()
+    with client.session() as session:
+        outcomes = restore(settings, session, photo_id=pid)
+    assert len(outcomes) == 1
+    assert not outcomes[0].restored and outcomes[0].detail
+    assert settings.photo_path(blurred_rel).read_bytes() == blurred_bytes
+    assert not (settings.root / "burst" / "IMG_0003.jpg").exists()
+    with client.session() as session:
+        entry = session.scalar(select(MoveLedger))
+        assert entry.phase == "quarantined"
+        assert entry.restored_at is None
+        assert entry.restore_error
 
 
 def test_member_that_cannot_decode_has_no_verdict(env) -> None:
@@ -374,6 +410,49 @@ def test_recovery_matrix_is_conservative_and_idempotent(env, restoring, location
             assert len(again) == 1 and not again[0].resolved
 
 
+def test_recovery_refuses_symlink_source(env, monkeypatch) -> None:
+    """Windows 无符号链接特权：monkeypatch is_symlink 只对待对账的源路径
+    返回 True，其余委托原实现——recover 必须保留 pending、两端字节不动。"""
+    from pathlib import Path
+
+    from photo_desk.triage import recover_moves
+
+    settings, client = env
+    rows = build_burst(settings, client)
+    row0 = rows["burst/IMG_0003.jpg"]
+    src = settings.photo_path(row0.rel_path)
+    payload = src.read_bytes()
+    with client.session() as session:
+        row = session.get(Photo, row0.id)
+        entry = MoveLedger(
+            photo_id=row.id,
+            rel_from=row0.rel_path,
+            rel_to="blurred/symlink_IMG_0003.jpg",
+            sha256=row.content_hash,
+            reason="blur_rank",
+            phase="quarantine_pending",
+        )
+        session.add(entry)
+        session.commit()
+        ledger_id = entry.id
+    real_is_symlink = Path.is_symlink
+
+    def fake_is_symlink(self):
+        if self == src:
+            return True
+        return real_is_symlink(self)
+
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+    with client.session() as session:
+        outcomes = recover_moves(settings, session)
+    assert len(outcomes) == 1
+    assert not outcomes[0].resolved and "符号链接" in outcomes[0].detail
+    assert src.read_bytes() == payload
+    assert not settings.photo_path("blurred/symlink_IMG_0003.jpg").exists()
+    with client.session() as session:
+        assert session.get(MoveLedger, ledger_id).phase == "quarantine_pending"
+
+
 def test_pending_blocks_scan_and_triage_without_creating_rows(env):
     settings, client = env
     rows = build_burst(settings, client)
@@ -396,6 +475,53 @@ def test_pending_blocks_scan_and_triage_without_creating_rows(env):
             with pytest.raises(RuntimeError, match="photos recover"):
                 operation(settings, session)
             assert len(list(session.scalars(select(Photo)))) == before
+
+
+@pytest.mark.parametrize("phase", ["quarantine_pending", "restore_pending"])
+def test_pending_blocks_apply_and_restore_before_any_move(env, phase) -> None:
+    settings, client = env
+    rows = build_burst(settings, client)
+    before = len(rows)
+    row0 = rows["burst/IMG_0003.jpg"]
+    other = rows["burst/IMG_0001.jpg"]
+    src_bytes = settings.photo_path(row0.rel_path).read_bytes()
+    other_bytes = settings.photo_path(other.rel_path).read_bytes()
+    with client.session() as session:
+        session.add(
+            MoveLedger(
+                photo_id=row0.id,
+                rel_from=row0.rel_path,
+                rel_to="blurred/pending.jpg",
+                sha256=row0.content_hash,
+                reason="blur_rank",
+                phase=phase,
+            )
+        )
+        session.commit()
+    # build_plan 被 guard 挡住，Move 直接构造：另一张在库、在盘、哈希一致的
+    # 合法隔离——guard 若被删掉，这张就真的会被移走。
+    mv = Move(
+        photo_id=other.id,
+        rel_from=other.rel_path,
+        rel_to="blurred/guard_IMG_0001.jpg",
+        group_id="guardgroup01",
+        sharpness=1.0,
+        best=2.0,
+    )
+    with client.session() as session:
+        with pytest.raises(RuntimeError, match="photos recover"):
+            apply_plan(settings, session, [mv])
+        assert len(list(session.scalars(select(Photo)))) == before
+        assert len(list(session.scalars(select(MoveLedger)))) == 1
+    assert settings.photo_path(other.rel_path).read_bytes() == other_bytes
+    assert not settings.photo_path(mv.rel_to).exists()
+    with client.session() as session:
+        with pytest.raises(RuntimeError, match="photos recover"):
+            restore(settings, session, photo_id=row0.id)
+        assert len(list(session.scalars(select(MoveLedger)))) == 1
+    # pending 意图两端字节不动：源仍在原位，目标从未出现
+    assert settings.photo_path(row0.rel_path).read_bytes() == src_bytes
+    assert not settings.photo_path("blurred/pending.jpg").exists()
 
 
 @pytest.mark.parametrize("after_rename", [False, True])

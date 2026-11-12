@@ -107,10 +107,14 @@ id | photo_id | rel_from | rel_to | sha256 | reason | group_id | moved_at | rest
 
 - "取消意图"也不删账本行；`moved_at`/`restored_at` 在完成确认时更新，中断后的
   对账时间是确认时间，不冒充精确 rename 时刻；
+- cancelled 行保留意图创建时的 `moved_at`/`note`，不做回填——**`phase` 才是权威**：
+  cancelled 行的 `moved_at` 是意图落盘时间，不是移动发生过的证据；
 - 存在未对清 pending 时，scan、triage（build_plan/apply）与 restore 一律拒绝
   执行——scan 会把隔离中断标成 missing、把放回中断的原位当新照片再次入库；
 - 旧版账本经 `ensure_columns` 补列，默认 `quarantined`；`restored_at != NULL`
   始终优先表示已放回，旧完成行不需批量回填；
+- 回退到修复前代码之前，必须先用 `photos recover` 对清全部 pending 意图：旧代码
+  忽略 `phase`，会把 pending 行误读成已完成的移动——新旧写者绝不混用；
 - `reason` 目前只有 `blur_rank`（组内排名垫底）与 `manual`（编辑模式人手），留枚举余地；
 - **放回 = 照账本走**：目标位置空闲 + 现文件 sha256 与账面一致 + Photo 身份/状态
   与账本一致 → 移回；sha256 不符（隔离后被人动过）→ 拒绝并标 `restore_error`，
