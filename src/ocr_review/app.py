@@ -27,6 +27,7 @@ from .workspace import (
     InboxDoc,
     StaleReviewError,
     Workspace,
+    done_count,
     scan_inbox,
     validate_target,
 )
@@ -104,7 +105,7 @@ def create_app(inbox: Path, work_root: Path) -> FastAPI:
             except StaleReviewError:
                 review = None
                 stale = True
-            done = sum(p.status == "done" for p in review.pages) if review else 0
+            done = done_count(review)
             rows.append(
                 {
                     "ws_id": it.ws_id,

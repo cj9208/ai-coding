@@ -119,6 +119,11 @@ def validate_target(item: InboxDoc, review: rv.ReviewDocument | None) -> None:
         )
 
 
+def done_count(review: rv.ReviewDocument | None) -> int:
+    """Pages marked done in a review; 0 when no review exists yet."""
+    return sum(p.status == "done" for p in review.pages) if review else 0
+
+
 class Workspace:
     """Directory-backed state for reviewing one document."""
 
@@ -188,8 +193,9 @@ class Workspace:
 
     def save_review(self, item: InboxDoc, review: rv.ReviewDocument) -> None:
         """Atomic write: temp file in-dir + os.replace, so a crash mid-save
-        can never truncate the only editable truth. The target is re-checked
-        after the temp write so a re-OCR racing the save cannot slip in."""
+        can never truncate the only editable truth. The post-write recheck
+        narrows the race window (no file locks); a re-OCR that still slips in
+        leaves the review bound to the old hash, flagged stale on next load."""
         self.load_review(item)
         validate_target(item, review)
         tmp = self.review_path.with_suffix(".json.tmp")
@@ -204,9 +210,7 @@ class Workspace:
 
     def progress(self, item: InboxDoc) -> tuple[int, int]:
         """(pages done, total pages)."""
-        review = self.load_review(item)
-        done = sum(p.status == "done" for p in review.pages) if review else 0
-        return done, len(item.doc.pages)
+        return done_count(self.load_review(item)), len(item.doc.pages)
 
     # ---------------------------------------------------------------- export
 

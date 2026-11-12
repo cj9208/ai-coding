@@ -130,7 +130,12 @@ def test_stale_review_rejected_without_rewriting_artifacts(
     base = saved.json()["updated_at"]
     assert client.post(f"/api/w/{ws_id}/export").status_code == 200
     work = tmp_path / "work" / ws_id
-    protected = [work / "review.json", *sorted((work / "export").iterdir())]
+    protected = [
+        work / "review.json",
+        work / "meta.json",
+        work / "pages" / "page-000.png",
+        *sorted((work / "export").iterdir()),
+    ]
     before = {str(p): p.read_bytes() for p in protected}
     changed = json.loads(bundle["json"].read_text(encoding="utf-8"))
     changed["pages"][0]["blocks"][0]["content"] = "NEW unrelated block with reused ID"
