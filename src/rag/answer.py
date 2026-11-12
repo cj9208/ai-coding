@@ -18,8 +18,10 @@ from .contract import Answer, Claim, EvidencePack, Outcome
 
 _MAX_CHUNK_CHARS = 1500
 
+# 有意泛化：数字、context 及混合列表（如 [1,context-2]）一律剥离，
+# 展示锚点只从 refs 生成；[note]、[1st] 等非引用括号保留。
 _INLINE_CITATION = re.compile(
-    r"\[\s*(?:[+-]?\d+(?:\s*[,，;；\-–]\s*[+-]?\d+)*|context-\d+)\s*\]"
+    r"\[\s*(?:[+-]?\d+|context-\d+)(?:\s*[,，;；\-–]\s*(?:[+-]?\d+|context-\d+))*\s*\]"
 )
 _PARTIAL_NOTICE = "证据不完整：以下仅列出有有效引文的声明，其余内容无法确认。"
 _REFUSAL_TEXT = "证据不足，无法提供有有效引文支持的回答。"
@@ -89,13 +91,13 @@ def validate_answer(answer: Answer, pack: EvidencePack) -> Answer:
     notes = [answer.notes] if answer.notes else []
     checked: list[Claim] = []
     rendered: list[str] = []
-    dropped = 0
+    refs_lost = 0
     for claim in answer.claims:
         if not claim.text.strip():
             continue
         refs = [r for r in claim.refs if 1 <= r <= n]
         if len(refs) != len(claim.refs):
-            dropped += 1
+            refs_lost += 1
         body = _claim_body(claim.text)
         if not body:
             refs = []
@@ -105,8 +107,8 @@ def validate_answer(answer: Answer, pack: EvidencePack) -> Answer:
             rendered.append(f"{body} {anchors}")
 
     uncited = sum(not claim.refs for claim in checked)
-    if dropped:
-        notes.append(f"{dropped} claim(s) lost refs that point outside evidence")
+    if refs_lost:
+        notes.append(f"{refs_lost} claim(s) lost refs that point outside evidence")
     if uncited:
         notes.append(f"{uncited} claim(s) have no valid citation")
 
@@ -122,7 +124,7 @@ def validate_answer(answer: Answer, pack: EvidencePack) -> Answer:
         text = _REFUSAL_TEXT
         notes.append("no citable claim remains for display")
     else:
-        if outcome == Outcome.answered and (dropped or uncited):
+        if outcome == Outcome.answered and (refs_lost or uncited):
             outcome = Outcome.partial
             notes.append("downgraded: not every claim traces to a valid citation")
         text = " ".join(rendered)

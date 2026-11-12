@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from rag.answer import build_prompt, generate, validate_answer
+from rag.answer import _claim_body, build_prompt, generate, validate_answer
 from rag.contract import Answer, Chunk, ChunkType, Claim, EvidencePack, Outcome
 from rag.enrich import LlmEnricher
 
@@ -75,6 +75,16 @@ def test_uncited_claim_downgrades(pack):
 def test_unknown_outcome_becomes_insufficient(pack):
     raw = Answer(outcome=Outcome.insufficient, text="x")  # enum-pinned already
     assert validate_answer(raw, pack).outcome == Outcome.insufficient
+
+
+def test_invalid_outcome_hits_defensive_refusal_branch(pack):
+    # model_construct 绕过枚举校验，真正触发 unknown-outcome 防御分支。
+    raw = Answer.model_construct(outcome="bogus", text="x", claims=[])
+    out = validate_answer(raw, pack)
+    assert out.outcome == Outcome.insufficient
+    assert out.text == "证据不足，无法提供有有效引文支持的回答。"
+    assert isinstance(out.notes, str)
+    assert "unknown outcome" in out.notes
 
 
 def test_clarify_and_insufficient_pass_through(pack):
@@ -212,6 +222,27 @@ def test_generate_renders_only_structured_refs(pack, marker):
     assert result.claims[0].text == f"年假{marker}需要审批"
     assert result.claims[0].refs == [1]
     assert result.text == "年假需要审批 [1]"
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "[1]",
+        "[1,2]",
+        "[context-3]",
+        "[ 1 ]",
+        "[1,context-2]",
+        "[context-1,2]",
+        "[1，context-2]",
+    ],
+)
+def test_claim_body_strips_pure_and_mixed_citation_markers(marker):
+    assert _claim_body(f"年假{marker}需要审批") == "年假需要审批"
+
+
+@pytest.mark.parametrize("marker", ["[note]", "[1st]"])
+def test_claim_body_preserves_non_citation_brackets(marker):
+    assert _claim_body(f"年假{marker}需要审批") == f"年假{marker}需要审批"
 
 
 @pytest.mark.parametrize(
