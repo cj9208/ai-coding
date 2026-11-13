@@ -80,9 +80,11 @@ any evidence, the honest output is "the research doesn't support a confident
 pick; here's what's missing and what we'd ask you next" — returned as a
 result, not an error.
 
+运行时间预算在阶段入口耗尽而尚无推荐结果时，也允许确定性弃权。此时不能声称“已核实不足两个候选”，只能说明评估未完成、已有材料保留，以及缩小问题范围后新建会话的下一步。该结果没有排名，不构造或推断用户偏好，整体置信度为 low；生成过程不调用模型。
+
 ## 4. Report format (the deliverable)
 
-One markdown file per run (`reports/{session}.md`), stable skeleton:
+每个会话的报告保存为 reports/{session}.md，并使用下列稳定骨架。DONE 的必要产物是已持久化的 RecommendationResult，不是文件写入成功；报告文件属于尽力交付。wallclock 离线收尾先提交结果和 DONE，再用已有渲染器生成报告；复用已有结果且已有报告路径时不重写。文件或路径登记失败会记录错误，但不抹去结果，也不为了报告重新调用模型。重复 run 不自动修复缺失报告，报告重建入口不属于当前实现。
 
 ```
 # Recommendation: <topic>            ← 3-line TL;DR: top pick + one reason + confidence
