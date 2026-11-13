@@ -112,8 +112,12 @@ def compose(ids: str, title: str, out: str) -> None:
 
     qids = [int(x) for x in ids.split(",") if x.strip()]
     store = Store()
-    path = compose_mod.compose(store, qids, title, Path(out))
-    store.dispose()
+    try:
+        path = compose_mod.compose(store, qids, title, Path(out))
+    except compose_mod.ComposeError as exc:
+        raise click.ClickException(f"组卷失败：{exc}") from exc
+    finally:
+        store.dispose()
     click.echo(f"wrote {path}")
 
 
