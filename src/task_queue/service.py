@@ -18,10 +18,7 @@ from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
-_SHUTDOWN = object()
-
-# Exponential backoff bounds for re-queueing a failed task. Without a delay a
-# rate-limited lane hot-loops, re-running the same failing task back-to-back.
+# Exponential backoff bounds for retrying a task in its current worker.
 _RETRY_BACKOFF_BASE = 0.1
 _RETRY_BACKOFF_CAP = 5.0
 
@@ -91,6 +88,8 @@ class TaskQueue:
         self._lanes: dict[str, _Lane] = {}
         self._accepting = False
         self._started = False
+        self._submissions: set[asyncio.Task[None]] = set()
+        self._stop_task: asyncio.Task[None] | None = None
 
     def lane(
         self,
@@ -110,8 +109,11 @@ class TaskQueue:
 
     async def start(self) -> None:
         """Start all lane worker pools."""
+        if self._stop_task is not None and not self._stop_task.done():
+            raise RuntimeError("Queue is stopping")
         if self._started:
             return
+        self._stop_task = None
         self._accepting = True
         self._started = True
         for lane_obj in self._lanes.values():
@@ -126,30 +128,47 @@ class TaskQueue:
         )
 
     async def stop(self, *, timeout: float = 30) -> None:
-        """Graceful shutdown: drain queued tasks, then stop workers."""
-        if not self._started:
-            return
-        self._accepting = False
+        if self._stop_task is None:
+            if not self._started:
+                return
+            self._accepting = False
+            self._stop_task = asyncio.create_task(
+                self._shutdown(timeout), name="queue-shutdown"
+            )
+        await asyncio.shield(self._stop_task)
 
-        for lane_obj in self._lanes.values():
-            for _ in lane_obj.workers:
-                await lane_obj.queue.put(_SHUTDOWN)
-
-        all_workers = [w for lane in self._lanes.values() for w in lane.workers]
-        if all_workers:
-            _, pending = await asyncio.wait(all_workers, timeout=timeout)
-            for t in pending:
-                t.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-                logger.warning(
-                    "TaskQueue stop: cancelled %d workers after %.0fs timeout",
-                    len(pending),
-                    timeout,
+    async def _shutdown(self, timeout: float) -> None:
+        putters = list(self._submissions)
+        workers = [w for lane in self._lanes.values() for w in lane.workers]
+        for putter in putters:
+            if not putter.done():
+                putter.cancel()
+        try:
+            async with asyncio.timeout(max(0.0, timeout)):
+                await asyncio.gather(*putters, return_exceptions=True)
+                await asyncio.gather(
+                    *(lane.queue.join() for lane in self._lanes.values())
                 )
-
-        self._started = False
-        logger.info("TaskQueue stopped")
+        except TimeoutError:
+            logger.warning("TaskQueue stop: drain exceeded %.3fs", timeout)
+        finally:
+            for worker in workers:
+                worker.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+            await asyncio.gather(*putters, return_exceptions=True)
+            for lane in self._lanes.values():
+                while True:
+                    try:
+                        task: _Task = lane.queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if not task.future.done():
+                        task.future.cancel()
+                    lane.queue.task_done()
+                lane.workers.clear()
+                lane.stats.pending = 0
+            self._started = False
+            logger.info("TaskQueue stopped")
 
     async def __aenter__(self) -> "TaskQueue":
         """Start the queue. Declare lanes *before* entering — ``lane()``
@@ -170,26 +189,32 @@ class TaskQueue:
         retries: int = 3,
         **kwargs: Any,
     ) -> asyncio.Future[Any]:
-        """Submit a task to a lane. Blocks if the lane's queue is full.
-
-        Returns a Future that resolves to the task's return value.
-        Raises QueueClosed if the queue is shutting down.
-        Raises KeyError if the lane doesn't exist.
-        """
         if not self._accepting:
             raise QueueClosed("Queue is not accepting tasks")
         lane_obj = self._lanes.get(lane)
         if lane_obj is None:
             raise KeyError(f"Unknown lane: {lane!r}")
-
         loop = asyncio.get_running_loop()
         future: asyncio.Future[Any] = loop.create_future()
         task = _Task(
             fn=fn, args=args, kwargs=kwargs, future=future, max_retries=retries
         )
-        await lane_obj.queue.put(task)
-        lane_obj.stats.pending = lane_obj.queue.qsize()
-        return future
+        putter = asyncio.create_task(lane_obj.queue.put(task))
+        self._submissions.add(putter)
+        try:
+            await putter
+            if not self._accepting:
+                future.cancel()
+                raise QueueClosed("Queue closed during submission")
+            lane_obj.stats.pending = lane_obj.queue.qsize()
+            return future
+        except asyncio.CancelledError:
+            future.cancel()
+            if not self._accepting:
+                raise QueueClosed("Queue closed during submission") from None
+            raise
+        finally:
+            self._submissions.discard(putter)
 
     def stats(self) -> dict[str, LaneStats]:
         """Snapshot of all lane stats."""
@@ -207,53 +232,46 @@ class TaskQueue:
     async def _worker_loop(self, lane_obj: _Lane) -> None:
         while True:
             item = await lane_obj.queue.get()
-            if item is _SHUTDOWN:
-                lane_obj.queue.task_done()
-                break
-
             task: _Task = item
             lane_obj.running += 1
             lane_obj.stats.pending = lane_obj.queue.qsize()
             try:
-                result = await task.fn(*task.args, **task.kwargs)
-                if not task.future.done():
-                    task.future.set_result(result)
-                lane_obj.stats.completed += 1
-                lane_obj.queue.task_done()
-            except Exception as exc:
-                if task.retries < task.max_retries:
-                    task.retries += 1
-                    # Back off, then re-queue. put() runs before task_done() so
-                    # the unfinished-task count never transiently drops to zero
-                    # (which would wake join() early); task_done() then accounts
-                    # for the get() that pulled this attempt, fixing a
-                    # +1-per-retry leak that made join() hang forever.
-                    await asyncio.sleep(
-                        min(
-                            _RETRY_BACKOFF_BASE * 2 ** (task.retries - 1),
-                            _RETRY_BACKOFF_CAP,
+                while not task.future.done():
+                    try:
+                        result = await task.fn(*task.args, **task.kwargs)
+                    except Exception as exc:
+                        if task.future.done():
+                            break
+                        if task.retries >= task.max_retries:
+                            task.future.set_exception(exc)
+                            lane_obj.stats.failed += 1
+                            logger.warning(
+                                "Task in lane %r failed after %d retries: %s",
+                                lane_obj.name,
+                                task.max_retries,
+                                exc,
+                            )
+                            break
+                        task.retries += 1
+                        await asyncio.sleep(
+                            min(
+                                _RETRY_BACKOFF_BASE * 2 ** (task.retries - 1),
+                                _RETRY_BACKOFF_CAP,
+                            )
                         )
-                    )
-                    await lane_obj.queue.put(task)
-                    lane_obj.queue.task_done()
-                    lane_obj.stats.pending = lane_obj.queue.qsize()
-                    logger.debug(
-                        "Task in lane %r failed (retry %d/%d): %s",
-                        lane_obj.name,
-                        task.retries,
-                        task.max_retries,
-                        exc,
-                    )
-                else:
-                    if not task.future.done():
-                        task.future.set_exception(exc)
-                    lane_obj.stats.failed += 1
-                    lane_obj.queue.task_done()
-                    logger.warning(
-                        "Task in lane %r failed after %d retries: %s",
-                        lane_obj.name,
-                        task.max_retries,
-                        exc,
-                    )
+                    else:
+                        if not task.future.done():
+                            task.future.set_result(result)
+                            lane_obj.stats.completed += 1
+                        break
+            except asyncio.CancelledError:
+                if not task.future.done():
+                    task.future.cancel()
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+                # task.fn 自己抛出的 CancelledError 只取消该任务，worker 继续。
             finally:
                 lane_obj.running -= 1
+                lane_obj.queue.task_done()
+                lane_obj.stats.pending = lane_obj.queue.qsize()
