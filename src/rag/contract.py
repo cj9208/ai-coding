@@ -186,12 +186,14 @@ class Outcome(StrEnum):
 class Claim(BaseModel):
     text: str
     refs: list[int] = Field(default_factory=list)
-    """1-based citation anchors into ``EvidencePack.chunks``."""
+    """EvidencePack.chunks 的 1-based 引用；校验后可能为空，声明仍保留。"""
 
 
 class Answer(BaseModel):
     outcome: Outcome
     text: str = ""
+    """validate_answer 之后的用户展示正文；不能用 claims 原文替代它。"""
     claims: list[Claim] = Field(default_factory=list)
+    """全部非空原始声明及清洗后的 refs，供审计和覆盖率计算；不是展示白名单。"""
     clarification: str = ""
     notes: str = ""
