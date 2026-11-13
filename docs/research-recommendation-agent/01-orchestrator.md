@@ -86,8 +86,9 @@ wallclock 从每次 run 开始计时，elapsed > wallclock_seconds 时耗尽；H
 
 ## 4. Resumption and `AWAIT_USER`
 
-AWAIT_USER 是正常暂停点，DONE 是正常完成点；两者均允许进程正常退出，FAILED 则表示失败退出。预算触发的离线弃权属于有明确结果的 DONE，而不是需要用户回答的暂停。The
-session row stores: phase, all artifacts so far, and the rendered questions.
+AWAIT_USER 是正常暂停点，DONE 是正常完成点；两者均允许进程正常退出，FAILED 则表示失败退出。预算触发的离线弃权属于有明确结果的 DONE，而不是需要用户回答的暂停。
+
+The session row stores: phase, all artifacts so far, and the rendered questions.
 Resumption = `POST /sessions/{id}/answers` loads the row, appends the answers
 as a `UserAnswers` artifact, and re-enters the machine at DEEPEN.
 
