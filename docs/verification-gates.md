@@ -159,6 +159,14 @@ merged under the rule.
   network or credentials, so CI runs them. The deadline is a cooperative-drain
   bound, **not a hard kill of an uncooperative coroutine**; the gate proves
   single-process lifecycle, not cross-process locking.
+- **exam_builder package integrity is an offline gate:** the exam_builder tests
+  use synthetic OOXML and temporary stores only. They cover missing, unreadable
+  and hash-mismatched cached media; unresolved fragment IDs; package-wide
+  relationship targets and External exceptions; preservation of existing output
+  on build/write/replace failure; OLE/media byte preservation and deduplication;
+  and CLI/Web failure responses without a success message, download or Paper row.
+  Run the focused gate with `uv run --no-sync pytest tests/test_exam_builder -q`.
+  These checks do not render formulas or open real user documents.
 
 `push` triggers CI on `main`; there is no deploy stage because there is nothing
 hosted to deploy — the honest CD for this repo would be a GHCR publish of
@@ -179,7 +187,7 @@ owner row in `TODO.md` so "not yet verified" stays a debt, not a myth:
 | photo_desk HEIC + NAS | real device tree mounted at `PHOTO_ROOT` | acceptance debt recorded in TODO.md (M0/M1 lines + the interruption-recovery drill on a controlled copy); the offline fault-injection gate above does not substitute |
 | quantdesk WS recording | a network where fstream actually pushes | live-verified gap: this machine's WS is silent; liquidation *positive* path awaits TODO.md |
 | notify Telegram delivery | real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, then `uv run notify emit … --severity alert && uv run notify schedule run-now && uv run notify schedule status` | **verified 2026-09-23** — four acceptance items on a real phone, plus one *unattended* round launched by the registered Task Scheduler (`LastTaskResult 0`, log tail in `data/notify/dispatch.log`); owed: the closed-lid sleep-wake catch-up (TODO.md) |
-| exam_builder composed paper | `uv run exam compose --ids … --out paper.docx`, then open it in real Word | package integrity is machine-checked (every `r:embed`/`r:id` resolves to a part that exists, OLE+WMF present, zip clean); **the Word-side eyeball check of formula/figure fidelity is still owed** — code can prove the parts are there, not that Word renders them |
+| exam_builder composed paper | compose an authorized sample and open the output in real Word | automated checks cover cached-media hashes, ZIP/XML integrity, internal relationship targets, External exceptions and failure-safe publication; **the Word-side eyeball check of formula/figure fidelity and OLE editing is still owed** — synthetic dummy bytes cannot prove rendering |
 | skill sync reproducibility | `uv run skills sync` on a deleted clone | verified: clone returned at its pin; keep as the check whenever UPSTREAMS changes |
 
 The rule that keeps this layer honest: **a connectivity that *pretends* to

@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
@@ -137,7 +137,13 @@ def create_app(store: Store | None = None) -> FastAPI:
             return RedirectResponse("/search", status_code=303)
         stem = "-".join(map(str, qids))[:60]
         out = config.db_path().parent / "papers" / f"paper-{stem}.docx"
-        compose_mod.compose(store, qids, title, out)
+        try:
+            compose_mod.compose(store, qids, title, out)
+        except compose_mod.ComposeError as exc:
+            return PlainTextResponse(
+                f"组卷失败：{exc}\n未生成新文件；请检查所列素材或包关系后重试。",
+                status_code=409,
+            )
         with store.client.session() as db:
             from .store import Paper
 

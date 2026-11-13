@@ -151,10 +151,15 @@ papers(id, title, question_ids_json, out_path, created_at)
    匹配 `QNO_RE`、再把被吃掉的 run 清空(`compose._renumber`);只改首个 `w:t` 会得到
    `1．3．如图` 这种双编号。无字面题号(如 `w:numPr` 自动编号的题)则前插。
 3. 追加"参考答案"区,按新编号排 `answer_xml`。
-4. **搬部件**:对每个引用的 media/embedding,按 sha 去重拷入新包;分配新 rId;改写片段内所有 `r:embed`/`r:id`;更新 `document.xml.rels` 与 `[Content_Types].xml`(wmf/png/bin 的 default/override)。
-5. 写出 `.docx`,记 `papers` 行,浏览器下载。
+4. **搬部件**：对题干与答案 manifest 中每个媒体/嵌入部件读取缓存，拒绝缺失、不可读、空字节和与入库 SHA-256 不符的内容，再按 SHA 去重拷入新包。分配新 rId，改写片段内的 `r:embed`/`r:id`/`r:link`；未登记的关系立即失败，不能保留旧 ID，也不能借用模板关系掩盖遗漏。
+5. **验证后发布**：在输出同目录创建临时 ZIP，写完并关闭后验证 ZIP CRC、XML、ContentType 声明，以及每个 `.rels` 的源部件、唯一 ID 和内部目标。内部 Target 按所属源部件解析相对路径或包根绝对路径，禁止逃出包根；`TargetMode="External"` 不要求目标在包内且不触发网络访问。所有 XML 关系引用必须在其所属关系文件中存在；模板的主文档/styles 关系也参与校验。只有候选包验证通过才 `os.replace` 最终输出，失败时清理临时文件，保留已有输出原字节。
+6. **错误交付**：CLI 报中文组卷错误并非零退出，不输出 `wrote`；Web 返回 409 中文文本，不插入 `papers` 行，不返回附件。成功时 Web 才记录 `papers` 并下载。
 
-验收:用 Word 打开,公式与几何图**原样可见**;把产物重新 ingest,题数与题干文本应与选择一致(往返测试)。
+D-3 的网页公式占位符不是导出降级许可：导出仍必须保留 OLE、WMF 与几何图的原字节。SHA/ZIP/关系校验不等于二进制语义或 Word 渲染校验。
+
+缓存恢复不能假定“再运行 ingest 就会补齐”：未变文件默认跳过，`--force` 也不覆盖已存在的坏媒体缓存，且重切可能改变题目 ID。先根据错误定位缓存与原文；用户确认并隔离坏缓存后，才强制重入库、重新选择题目。源 Word 已不可用时不得声称能够自动恢复。
+
+自动化验收使用合成 OOXML/字节夹具，覆盖故障时不发布、旧输出保护、所有内部关系与正常去重/OLE 搬运。现有 roundtrip 测试是重新打开输出 ZIP，不是重新入库。真机验收仍需在 Word 中确认公式与几何图原样可见、OLE 可双击编辑、正文和答案的题号与选择顺序一致；部件完整性不能代替这项验收。
 
 ## 7. UI 线框(D-8)
 
@@ -201,6 +206,6 @@ papers(id, title, question_ids_json, out_path, created_at)
 | 门 | 内容 |
 |---|---|
 | L1 pre-commit | 常规 black/isort/mypy/flake8 |
-| L2 CI | 单测:切题(含锚点缺失/题号变体)、rId 重排、manifest 去重;golden 切题夹具 |
+| L2 CI | 单测：切题与 golden 夹具、rId 重排；缓存缺失/损坏/不可读、题干/答案遗漏关系、模板/包内关系与路径校验、External 例外、失败输出保护、正常去重/OLE 字节保留、CLI/Web 错误边界 |
 | L3 真机 | `ingest` 全 53 份;compose 产物用 Word 打开肉眼验公式/图 |
 | L4 证据 | 往返测试(产物 re-ingest 文本一致)记录进本文 §8 验收 |
