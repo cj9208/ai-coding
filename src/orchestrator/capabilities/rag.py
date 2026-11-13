@@ -7,11 +7,10 @@ The adapter is deliberately dumb — the whole point of the architecture:
 - DP-10: the routing decision's conservative constraint is honored here and
   only here — ``topk_factor`` widens retrieval (ceil), nothing downstream
   re-widens it;
-- grounding: rag reports fully-cited answers via its own integrity check;
-  the adapter turns that into ``grounding_coverage`` (cited claims / claims),
-  and withholds ``citations`` when the answer is only partial — the
-  validation table then speaks (v3 switch on low coverage, v6
-  partial_answer on useful-but-incomplete).
+- grounding：generate 保留全部非空原始声明及清洗后的 refs；adapter
+  从同一列表计算 grounding_coverage，不另存分母。展示使用已重建的
+  Answer.text；partial 仍不提供 citations，由原有 v3/v6 判断后续动作。
+  该比例衡量锚点完整性，不表示语义正确率。
 """
 
 from __future__ import annotations
@@ -154,6 +153,7 @@ class RagQueryCapability:
 
 
 def _coverage(answer: Answer) -> float:
+    """输入须已校验；分母包含无有效 refs 的非空原始声明。"""
     claims = [c for c in answer.claims if c.text.strip()]
     if not claims:
         return 0.0

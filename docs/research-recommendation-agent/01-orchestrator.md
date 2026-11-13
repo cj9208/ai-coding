@@ -53,8 +53,9 @@ Transition table (the only place transitions are written):
 | CLARIFY | `nothing_to_ask` | DEEPEN or RECOMMEND | — |
 | AWAIT_USER | answers received (or skip) | DEEPEN | — |
 | DEEPEN | follow-up done or empty | RECOMMEND | Research |
-| RECOMMEND | report written | DONE | Recommendation |
-| any | budget violated / user abort | FAILED (state kept) | — |
+| RECOMMEND | RecommendationResult 已保存；报告文件尽力交付 | DONE | Recommendation |
+| 任一可执行阶段 | 阶段入口发现本次 run 的 wallclock 预算耗尽 | DONE（原有结果或离线弃权结果） | Orchestrator，不执行新阶段 |
+| any | 不可恢复的阶段错误、损坏的持久化产物；用户中止策略不属于预算降级 | FAILED（保留已存产物） | Orchestrator |
 
 Every transition is a single transaction: write the new phase **and** the
 artifact it produced, then commit. Crash-safety is "re-read the session and
@@ -77,15 +78,17 @@ class Budget:
     wallclock_seconds: int = 600
 ```
 
-On violation the orchestrator does **not** discard work: it forces the
-machine forward to the next terminal-ish phase with whatever evidence exists
-and marks `stop_reason="budget"` so the recommendation lowers confidence
-accordingly. Failing loudly with no output is worse than a hedged answer.
+预算耗尽不丢弃已完成工作，但两种预算有不同收尾方式。采集次数、研究轮数、追问轮数或 deepen 次数耗尽时，继续按阶段推进规则移交已有证据，并标记 stop_reason="budget"；wallclock 则在下一次可执行阶段入口直接离线结束，不再启动任何阶段或模型请求。
+
+wallclock 从每次 run 开始计时，elapsed > wallclock_seconds 时耗尽；HITL 等待不计入，下次 run 重新计时。已有阶段不被取消，其结果和计数先保存，然后在下一次入口检查。这是阶段边界预算，不是严格的请求取消或物理耗时上限；终态检查优先，因此阶段已经返回 DONE、FAILED 或 AWAIT_USER 时直接返回该状态。
+
+离线收尾必须有合法 RecommendationResult：已有结果保持原样；没有结果时构造 picks=[]、abstained=True、overall_confidence="low"、stop_reason="budget" 的结果，并解释评估未完成。结果与 DONE 在同一事务提交，session.stop_reason 标记 budget。旧结果中的停止原因与置信度不被本次运行改写。文件报告在提交后尽力生成；失败不撤销已存结果，也不触发重复运行推荐。
 
 ## 4. Resumption and `AWAIT_USER`
 
-`AWAIT_USER` is the only phase where the process may exit normally. The
-session row stores: phase, all artifacts so far, and the rendered questions.
+AWAIT_USER 是正常暂停点，DONE 是正常完成点；两者均允许进程正常退出，FAILED 则表示失败退出。预算触发的离线弃权属于有明确结果的 DONE，而不是需要用户回答的暂停。
+
+The session row stores: phase, all artifacts so far, and the rendered questions.
 Resumption = `POST /sessions/{id}/answers` loads the row, appends the answers
 as a `UserAnswers` artifact, and re-enters the machine at DEEPEN.
 
