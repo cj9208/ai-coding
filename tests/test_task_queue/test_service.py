@@ -466,7 +466,7 @@ async def test_task_cancelled_error_does_not_kill_worker():
 
 async def test_start_rejected_while_shutdown_in_flight():
     """start() during an in-flight shutdown is explicitly rejected; the
-    shared cleanup task keeps running (first timeout wins)."""
+    shared cleanup task keeps running."""
     q = TaskQueue()
     q.lane("work", workers=1, maxsize=1)
     await q.start()

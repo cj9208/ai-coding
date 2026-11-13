@@ -128,6 +128,8 @@ class TaskQueue:
         )
 
     async def stop(self, *, timeout: float = 30) -> None:
+        """Seal submissions, drain within ``timeout``, then cancel workers and
+        settle pending futures. Concurrent stops share one shielded cleanup."""
         if self._stop_task is None:
             if not self._started:
                 return
@@ -189,6 +191,12 @@ class TaskQueue:
         retries: int = 3,
         **kwargs: Any,
     ) -> asyncio.Future[Any]:
+        """Submit a task to a lane, blocking if the lane's queue is full.
+
+        Returns a Future resolving to the task's return value. Raises
+        QueueClosed if the queue is not accepting (or closes mid-submission),
+        KeyError if the lane doesn't exist.
+        """
         if not self._accepting:
             raise QueueClosed("Queue is not accepting tasks")
         lane_obj = self._lanes.get(lane)
