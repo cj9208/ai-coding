@@ -85,6 +85,10 @@ code cannot decide.** Concretely:
 | score margin > 0.05 | adversarial re-rank skipped |
 | `--context "…"` filled well | fewer decision-relevant gaps → fewer questions → cheaper DEEPEN |
 
+Budget.wallclock_seconds 默认 600 秒，是每次 run 的阶段入口预算，不是 CLI 的新参数，也不包含等待用户的时间。入口检查发现超时后不再启动阶段或模型调用：已有推荐结果保持原样，没有结果则保存明确说明评估未完成的低置信度弃权结果，并尽力输出报告。已经开始的阶段会先完成；其内部后续请求不会因这个检查被取消，整个运行的实际耗时可能超过 600 秒。
+
+重复运行已经 DONE 的会话不会重新研究、追加推荐结果或重写报告。报告文件写入失败时，数据库仍可能有完整结果而 report 命令显示尚无报告；当前 report 命令只读取已登记文件，不会离线重建，也不能用再次 run 修复报告。修复文件交付应另行处理，不要因此重复消耗模型预算。使用 new --fake 仍可能调用模型，不能替代 ScriptedLLM 的离线回归。
+
 A typical MVP run: 1 plan + N batch extractions + 1–2 reflects + 1 clarify +
 1 profile + 1 score (+1 adversarial at most). The offline e2e test asserts
 these call counts exactly (`ScriptedLLM.calls`) — if a change adds a call,
