@@ -9,6 +9,8 @@ python-docx 不碰 ``w:object``,重建必丢公式。这里直接操纵 zip 包:
 3. 追加「参考答案」区;
 4. 按 sha 去重把引用的 media/embeddings 拷入新包,分配新 rId 并改写片段内
    所有 ``r:embed``/``r:id``;同步 ``document.xml.rels`` 与 ``[Content_Types]``。
+5. 候选包写到输出同目录临时 ZIP,关闭后校验 CRC/部件/关系,通过才 os.replace
+   发布;素材缺失/损坏或包不完整抛 ComposeError,保留已有输出原字节。
 """
 
 from __future__ import annotations
