@@ -21,7 +21,7 @@ import from here, never define their own cross-phase types.
 | `EvidencePack` | Research (assembled) | Clarifying, Recommender |
 | `Clarification` / `UserAnswers` | Clarifying / user | Recommender (profile), Orchestrator (state) |
 | `PreferenceProfile` | Recommender step 1 | Recommender steps 2–4, Report |
-| `RecommendationResult` | Recommender | Report renderer |
+| `RecommendationResult` | Recommender；wallclock 耗尽时由 Orchestrator 构造确定性弃权结果 | Report renderer、Orchestrator 终态守卫 |
 
 Every artifact carries `session_id`, `schema_version`, `created_at`. Findings
 and Captures carry `id`s of form `F*`/`C*` because those ids are user-visible
@@ -121,6 +121,8 @@ field graduates to query use, it graduates to a column.
 CJK note: `findings_fts` must reuse the `fold_cjk` trick already proven in
 `file_manager` — this machine's FTS5 `unicode61` drops CJK tokens (see
 project memory / `docs/file-manager.md`).
+
+wallclock 离线收尾复用现有 transition 事务，将新 RecommendationResult、DONE 和 session.stop_reason="budget" 一起提交；已有结果则不追加历史副本。事务失败时结果和阶段一起回滚，调用者可以重新运行。报告文件写入和 reports 路径登记不在此事务内，不能把有结果无报告误解成结果丢失。已保存的非法 RecommendationResult 仍按产物损坏处理为 FAILED，而不是无条件复用。
 
 ## 5. Testing surfaces (why this layout is cheap to verify)
 

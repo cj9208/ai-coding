@@ -138,11 +138,12 @@ uv run rag query "年假超过几天需要审批？" -k 5          # retrieval +
 uv run rag query "年假超过几天需要审批？" --retrieve-only  # evidence only, no LLM
 ```
 
-Output order: the evidence pack (candidate count, best FTS score, each
-`[n] chunk_id (type) section :: first line`), then `outcome:` plus the
-answer text and one line per claim with its `[refs]`. `clarify` prints its
-question; `notes:` reports citation damage. Exit 0 for `answered`/
-`partial`, **2** for `clarify`/`insufficient`/`escalated` — scriptable.
+输出顺序：先展示证据包（候选数、最佳 FTS 分数、每个 [n] 的 chunk_id、类型、
+章节与首行），再展示 outcome 和确定性重建的安全正文。正文带规范 [n] 引用；
+partial 总有证据缺口说明。CLI 不再逐条展示 Answer.claims，因为其中保留了
+无有效引用的原始声明。clarify 展示问题；notes 报告引用损坏。
+answered/partial 退出 0，clarify/insufficient/escalated 退出 2；空 claims 或
+没有任何可展示有据声明的事实回答归 insufficient。--retrieve-only 行为不变。
 
 `--retrieve-only` is the debugging workhorse: it shows what retrieval
 believed *before* blaming the generator. Zero hits or a best score under
@@ -201,6 +202,9 @@ rag.query  812.3 ms  question=年假超过几天需要审批？
     rag.path.fts.search  12.4 ms  hits=10  relaxed=False
   gen_ai.completion  748.9 ms  outcome=answered  n_claims=2
 ```
+
+n_claims 表示校验后保留的全部非空原始声明数，包括 refs 为空的声明；不是可展示
+声明数，也不是语义正确声明数。
 
 Use it to answer "where did the time go" (LLM vs FTS vs publish) and "why
 did it abstain" (relaxed flag, n_candidates) without rerunning anything.

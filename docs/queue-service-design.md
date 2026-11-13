@@ -143,7 +143,7 @@ class TaskQueue:
         """启动所有 lane 的 worker pool。"""
 
     async def stop(self, *, timeout: float = 30) -> None:
-        """Graceful shutdown：停止接收新任务，等待已提交任务完成。"""
+        """Graceful shutdown：停止接收新任务，在 timeout 期限内排空；到期取消并结算 pending Future。"""
 
     async def submit(
         self,
@@ -188,33 +188,41 @@ class LaneStats:
 async def _worker_loop(self, lane: _Lane) -> None:
     while True:
         task = await lane.queue.get()       # 等待任务
-        if task is _SHUTDOWN:               # 优雅退出信号
-            break
+        lane.stats.running += 1
         try:
-            lane.stats.running += 1
-            result = await task.fn(*task.args, **task.kwargs)
-            task.future.set_result(result)
-            lane.stats.completed += 1
-        except Exception as exc:
-            if task.retries < task.max_retries:
-                task.retries += 1
-                await lane.queue.put(task)  # 重新入队
-            else:
-                task.future.set_exception(exc)
-                lane.stats.failed += 1
+            while not task.future.done():   # 同一 worker 持有任务直到成功/重试耗尽/取消
+                try:
+                    result = await task.fn(*task.args, **task.kwargs)
+                except Exception as exc:
+                    if task.retries >= task.max_retries:
+                        task.future.set_exception(exc)
+                        lane.stats.failed += 1
+                        break
+                    task.retries += 1
+                    await asyncio.sleep(backoff(task.retries))  # worker 内指数退避，不回投
+                else:
+                    task.future.set_result(result)
+                    lane.stats.completed += 1
+                    break
         finally:
             lane.stats.running -= 1
-            lane.queue.task_done()
+            lane.queue.task_done()          # 一次出队只配对一次 task_done
 ```
+
+worker 被取消时取消未完成的 future（不虚构成功）；`task.fn` 自己抛出的 `CancelledError` 只取消该任务，worker 继续。空闲 worker 通过 cancel 退出，不再向可能已满的队列投递哨兵。
 
 ### 3.5 Graceful Shutdown
 
+stop 先停接收，在同一个期限内排空；到期取消，并结算 pending Future；期限不是对不合作协程的强杀保证。
+
 `stop()` 的行为：
 
-1. 设置 `_accepting = False`，后续 `submit()` 抛 `QueueClosed`
-2. 向每个 lane 的 queue 放入 `len(workers)` 个 `_SHUTDOWN` 哨兵
-3. `await asyncio.gather(*all_workers)` 等待所有 worker 退出
-4. 超过 `timeout` 则 cancel 剩余 worker，记录未完成的任务数
+1. 设置 `_accepting = False`，后续 `submit()` 抛 `QueueClosed`；取消仍在等待队列空位的 put，对应的 submit 抛 `QueueClosed`，不会遗留到下一次 start
+2. 在同一个 `timeout` 期限内等待已提交任务排空（`queue.join()`）——期限覆盖完整排空过程，而不是只等 worker 退出
+3. 到期开始取消：取消运行中与空闲 worker，取消队列中剩余的 pending Future 并结算计数；不虚构成功，取消不计入 completed/failed，调用者按 asyncio 的 `CancelledError` 语义处理
+4. `stop` 幂等；并发 `stop` 共享同一内部清理任务（第一个 timeout 生效）；取消调用 `stop` 的协程不会取消内部清理任务；`start` 在关闭中明确拒绝
+
+已经开始执行的函数，不承诺因 submit 调用者随后取消就回滚副作用——业务操作仍应幂等。对吞掉 `CancelledError` 的代码或阻塞事件循环的同步函数，期限无法保证按时返回。
 
 ## 4. Layer 2: TokenBucket（限流层）
 
@@ -408,9 +416,11 @@ async def enrich(self, chunks):
 
 ### 7.1 任务级重试
 
-每个 task 携带 `retries` 计数器。worker 捕获异常后：
-- `retries < max_retries` → 重新入队（放回 lane queue 尾部）
+失败任务在原 worker 内按次数退避，不回投有界 lane；一次出队只在整个任务结束时配对 task_done。每个 task 携带 `retries` 计数器（首次尝试之外的附加次数），worker 捕获异常后：
+- `retries < max_retries` → `retries += 1`，在同一 worker 内指数退避后重试
 - `retries >= max_retries` → `future.set_exception()`，计入 `failed`
+
+为什么不回投：有界 lane 满载时，回投会让 worker 等待自己腾出空位——自等待死锁。退避期间占用该 worker 是消除自等待的既定代价，本轮不新增公平调度队列。一次成功入队对应一次 `task_done()`（不是每次尝试一次），`join()` 计数天然配平。
 
 这和 `llm_client` 的 tenacity retry 是**互补**的：
 - tenacity：处理 HTTP 级瞬时错误（429、timeout、5xx），对调用方透明

@@ -21,7 +21,7 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from ..contracts.models import PhaseName, UserAnswers
+from ..contracts.models import PhaseName, RecommendationResult, UserAnswers
 from ..persistence.store import SessionStore
 from .budget import Budget, BudgetView
 from .view import ArtifactError, SessionView
@@ -108,7 +108,7 @@ class Orchestrator:
     # -- public API -----------------------------------------------------------
 
     async def run(self, session_id: str) -> PhaseName:
-        """Advance until AWAIT_USER (HITL pause), DONE, or FAILED."""
+        """推进至终态；wallclock 仅在阶段入口检查，不取消正在执行的阶段。"""
         started = time.monotonic()
         self._init_counters(session_id)
         while True:
@@ -119,16 +119,14 @@ class Orchestrator:
                 self._leave_intake(session_id)
                 continue
             if time.monotonic() - started > self.budget.wallclock_seconds:
-                logger.warning("wallclock budget exceeded; forcing forward")
-                self._force_advance(session_id, phase, "budget")
-                continue
+                logger.warning("wallclock budget exceeded; finishing offline")
+                return self._finish_wallclock(session_id, phase)
             if not self._budget_allows(session_id, phase):
                 self._force_advance(session_id, phase, "budget")
                 continue
             outcome = await self._run_step(session_id, phase)
-            if outcome is None:  # hard failure already recorded
+            if outcome is None:
                 return PhaseName(self.store.get_phase(session_id))
-        # unreachable; loop returns from TERMINAL
 
     def resume(self, session_id: str, answers: UserAnswers) -> None:
         """Re-enter the machine at DEEPEN with the answers appended (01 §4)."""
@@ -175,6 +173,49 @@ class Orchestrator:
             ),
         )
         return outcome
+
+    def _finish_wallclock(self, session_id: str, phase: PhaseName) -> PhaseName:
+        """离线结束预算耗尽的运行；先持久化结果，再尽力交付报告。"""
+        view = self.load_view(session_id)
+        try:
+            result = view.result
+        except ArtifactError as exc:
+            logger.error("artifact error at %s: %s", phase.value, exc)
+            self.store.transition(
+                session_id, PhaseName.FAILED.value, stop_reason=f"artifact-error: {exc}"
+            )
+            return PhaseName.FAILED
+
+        artifacts: list[BaseModel] = []
+        if result is None:
+            result = RecommendationResult(
+                session_id=session_id,
+                abstained=True,
+                overall_confidence="low",
+                stop_reason="budget",
+                missing_for_confidence=(
+                    f"在 {phase.value} 阶段入口检查时，运行时间预算（wallclock）"
+                    "已耗尽，推荐评估未完成。已保留已采集材料和用户回答；"
+                    "建议缩小问题范围后新建会话，不依据本次未完成的评估作出选择。"
+                ),
+            )
+            artifacts.append(result)
+
+        self.store.transition(
+            session_id,
+            PhaseName.DONE.value,
+            artifacts=artifacts,
+            stop_reason="budget",
+        )
+        try:
+            if artifacts or self.store.get_report_path(session_id) is None:
+                from ..recommendation.agent import render_and_save
+
+                path = render_and_save(self.store, view, result, view.profile)
+                logger.info("wallclock report written: %s", path)
+        except Exception as exc:  # noqa: BLE001 — 报告失败不撤销已提交的结果
+            logger.exception("wallclock report rendering failed: %s", exc)
+        return PhaseName.DONE
 
     def _force_advance(self, session_id: str, phase: PhaseName, reason: str) -> None:
         """Budget violated: push forward with whatever evidence exists (01 §3).

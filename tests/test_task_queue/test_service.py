@@ -42,6 +42,7 @@ async def test_multiple_tasks_run_concurrently():
     results = await asyncio.gather(*futures)
     assert all(r == "done" for r in results)
     assert peak > 1  # concurrency actually happened
+    await q.stop()
 
 
 async def test_lane_isolation():
@@ -290,3 +291,200 @@ async def test_async_context_manager_stops_on_exception():
     # Workers were still shut down despite the exception propagating.
     with pytest.raises(QueueClosed):
         await q.submit("work", lambda: None)
+
+
+async def _force_cleanup_queue(q):
+    q._accepting = False
+    workers = [w for lane in q._lanes.values() for w in lane.workers]
+    pending = list(getattr(q, "_submissions", ()))
+    shutdown = getattr(q, "_stop_task", None)
+    if shutdown is not None:
+        pending.append(shutdown)
+    for task in workers + pending:
+        task.cancel()
+    await asyncio.gather(*workers, *pending, return_exceptions=True)
+    for lane in q._lanes.values():
+        while not lane.queue.empty():
+            item = lane.queue.get_nowait()
+            if hasattr(item, "future") and not item.future.done():
+                item.future.cancel()
+            lane.queue.task_done()
+
+
+async def test_retry_with_full_queue_finishes_and_balances_join(monkeypatch):
+    import task_queue.service as service
+
+    monkeypatch.setattr(service, "_RETRY_BACKOFF_BASE", 0)
+    q = TaskQueue()
+    q.lane("work", workers=1, maxsize=1)
+    await q.start()
+    entered, release = asyncio.Event(), asyncio.Event()
+    attempts = 0
+
+    async def flaky():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            entered.set()
+            await release.wait()
+            raise ValueError("transient")
+        return "recovered"
+
+    async def second():
+        return "second"
+
+    try:
+        first = await q.submit("work", flaky, retries=1)
+        await entered.wait()
+        following = await q.submit("work", second)
+        assert q._lanes["work"].queue.full()
+        release.set()
+        assert await asyncio.wait_for(asyncio.shield(first), 1) == "recovered"
+        assert await asyncio.wait_for(following, 1) == "second"
+        await asyncio.wait_for(q._lanes["work"].queue.join(), 1)
+        assert attempts == 2
+        assert q.stats()["work"].completed == 2
+    finally:
+        await _force_cleanup_queue(q)
+
+
+async def test_stop_deadline_includes_full_queue_and_settles_futures():
+    q = TaskQueue()
+    q.lane("work", workers=1, maxsize=1)
+    await q.start()
+    entered = asyncio.Event()
+    never = asyncio.Event()
+
+    async def stuck():
+        entered.set()
+        await never.wait()
+
+    try:
+        running = await q.submit("work", stuck)
+        await entered.wait()
+        queued = await q.submit("work", stuck)
+        await asyncio.wait_for(q.stop(timeout=0.05), 1)
+        assert running.cancelled()
+        assert queued.cancelled()
+        await asyncio.wait_for(q._lanes["work"].queue.join(), 1)
+        stats = q.stats()["work"]
+        assert stats.running == stats.pending == 0
+        await q.stop(timeout=0.05)
+    finally:
+        await _force_cleanup_queue(q)
+
+
+async def test_stop_unblocks_pending_submit_and_allows_clean_restart():
+    q = TaskQueue()
+    q.lane("work", workers=1, maxsize=1)
+    await q.start()
+    entered, submitting, never = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def stuck():
+        entered.set()
+        await never.wait()
+
+    async def submit_one():
+        submitting.set()
+        return await q.submit("work", stuck)
+
+    async def healthy():
+        return 7
+
+    blocked = None
+    try:
+        first = await q.submit("work", stuck)
+        await entered.wait()
+        second = await q.submit("work", stuck)
+        blocked = asyncio.create_task(submit_one())
+        await submitting.wait()
+        await asyncio.wait_for(q.stop(timeout=0.05), 1)
+        with pytest.raises(QueueClosed):
+            await asyncio.wait_for(blocked, 1)
+        assert first.cancelled() and second.cancelled()
+        assert not q._submissions
+        await q.start()
+        result = await q.submit("work", healthy)
+        assert await asyncio.wait_for(result, 1) == 7
+        assert len(q._lanes["work"].workers) == 1
+        await q.stop()
+    finally:
+        if blocked is not None and not blocked.done():
+            blocked.cancel()
+            await asyncio.gather(blocked, return_exceptions=True)
+        await _force_cleanup_queue(q)
+
+
+async def test_cancelling_stop_caller_does_not_cancel_cleanup():
+    q = TaskQueue()
+    q.lane("work", workers=1, maxsize=1)
+    await q.start()
+    entered, stopping, never = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def stuck():
+        entered.set()
+        await never.wait()
+
+    async def stop_caller():
+        stopping.set()
+        await q.stop(timeout=0.05)
+
+    try:
+        result = await q.submit("work", stuck)
+        await entered.wait()
+        caller = asyncio.create_task(stop_caller())
+        await stopping.wait()
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        await asyncio.wait_for(q.stop(timeout=0.05), 1)
+        assert result.cancelled()
+        assert not q._started
+        assert not q._lanes["work"].workers
+    finally:
+        await _force_cleanup_queue(q)
+
+
+async def test_task_cancelled_error_does_not_kill_worker():
+    q = TaskQueue()
+    q.lane("work", workers=1)
+
+    async def cancelled():
+        raise asyncio.CancelledError
+
+    async def healthy():
+        return "ok"
+
+    async with q:
+        result = await q.submit("work", cancelled)
+        with pytest.raises(asyncio.CancelledError):
+            await result
+        next_result = await q.submit("work", healthy)
+        assert await asyncio.wait_for(next_result, 1) == "ok"
+        await asyncio.wait_for(q._lanes["work"].queue.join(), 1)
+
+
+async def test_start_rejected_while_shutdown_in_flight():
+    """start() during an in-flight shutdown is explicitly rejected; the
+    shared cleanup task keeps running."""
+    q = TaskQueue()
+    q.lane("work", workers=1, maxsize=1)
+    await q.start()
+    entered, never = asyncio.Event(), asyncio.Event()
+
+    async def stuck():
+        entered.set()
+        await never.wait()
+
+    try:
+        result = await q.submit("work", stuck)
+        await entered.wait()
+        stopping = asyncio.create_task(q.stop(timeout=0.05))
+        await asyncio.sleep(0)  # let stop() seal submissions and spawn cleanup
+        with pytest.raises(RuntimeError, match="stopping"):
+            await q.start()
+        await asyncio.wait_for(stopping, 1)
+        assert result.cancelled()
+        assert not q._started
+    finally:
+        await _force_cleanup_queue(q)

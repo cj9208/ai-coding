@@ -603,12 +603,14 @@ Decisions the contract left open, now fixed in code:
   `turn.out.clarification_question` from the result when the front half had
   no question) — routing stays the only reinterpret authority, but the user
   hears what actually went missing.
-- **`citations` is a required output field, and the adapter withholds it on
-  partial answers** — that (not an invented status) is what makes validation
-  v6 `partial_answer` reachable: useful text + missing field + low risk.
-  `grounding_coverage` = claims with valid refs / claims; v3 fires below the
-  0.5 floor before v6 gets a chance, so weakly-grounded answers hand off
-  rather than partial-answer.
+- citations 仍是 required output field，partial 仍不提供它，使有用但不完整的
+  回答可进入 v6。grounding_coverage 从 RAG 校验后保留的全部非空原始声明计算：
+  有有效 refs 的声明数 / 全部声明数，无声明为 0；不是语义正确率。10 条声明
+  只有 1 条有效引用时为 0.1，不得因清洗 refs 丢掉其余声明而变成 1.0。
+  v3 在低于 0.5 时先于 v6 触发：有可运行替代能力则切换，没有则 handoff。
+  0.5 不触发 v3，仍可由 v6 产生 partial_answer；此时交付的是 RAG 重建的
+  有据正文和明确缺口说明，不包含无支撑原文。没有任何可展示有据声明时 RAG
+  返回 insufficient，由执行表处理，不要求这类结果经过 v3。
 - **DP-10 is one line where it matters:** `conservative` + `topk_factor`
   from the routing decision's constraints widens `retrieve(k=ceil(5*1.5))`
   inside the adapter and nowhere else.
