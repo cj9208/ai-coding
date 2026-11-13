@@ -146,6 +146,19 @@ merged under the rule.
   v3/v6 decision rows, the CLI's second-leak guard and the trace counts — no API
   credentials or real corpus needed, so CI runs them. The gate proves citation
   integrity, **not semantic entailment accuracy**.
+- **task_queue retry/shutdown lifecycle is an offline gate:** `tests/test_task_queue`
+  drives the real `TaskQueue` with fake async tasks and deterministic
+  `Event`/`sleep(0)` coordination — a full bounded lane no longer self-deadlocks
+  (a failed task backs off inside its own worker, never re-put), one dequeue
+  pairs exactly one `task_done` so `join()` terminates, `stop` seals submissions,
+  cancels blocked putters, drains within the deadline then cancels workers and
+  settles pending futures, concurrent stops share one shielded cleanup, and
+  `start` is rejected mid-shutdown. The sole production consumer
+  `tests/test_rag/test_enrich.py` runs alongside to pin EnrichPartialError,
+  successful-item persistence, parent-block filtering and re-entrancy. No
+  network or credentials, so CI runs them. The deadline is a cooperative-drain
+  bound, **not a hard kill of an uncooperative coroutine**; the gate proves
+  single-process lifecycle, not cross-process locking.
 
 `push` triggers CI on `main`; there is no deploy stage because there is nothing
 hosted to deploy — the honest CD for this repo would be a GHCR publish of
